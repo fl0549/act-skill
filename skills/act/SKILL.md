@@ -1,9 +1,9 @@
 ---
-name: act-daily
-description: Run the ACT (Tester Party) closed-test exchange on a USB-connected Android phone over adb. `today` opens every app of ACT's "Aujourd'hui" list (~25 s each) and checks ACT counted it; `accept` accepts the pending exchange requests aimed at one of the user's apps only; `install` joins each new app's Google Group, opts in and installs it from the Play Store (free apps under a size limit only). Use when the user says "fais ACT", "lance ACT", "fais mes tests ACT du jour", "ouvre les applis à tester", "accepte les demandes", "installe les nouvelles apps", "do my ACT tests", or anything about the Tester Party closed-test exchange. No emulator.
+name: act
+description: Run the ACT (Tester Party) closed-test exchange on a USB-connected Android phone over adb. `today` opens every app of ACT's "Aujourd'hui" list (~25 s each) and checks ACT counted it; `accept` accepts the pending exchange requests aimed at the user's own apps only; `install` joins each new app's Google Group, opts in and installs it from the Play Store (free apps under a size limit only). Every command has a `--dry-run`. Use when the user says "do my ACT tests", "run ACT", "accept the ACT requests", "install the new ACT apps", "fais ACT", "lance ACT", "fais mes tests ACT du jour", "accepte les demandes", "installe les nouvelles apps", or anything about the Tester Party closed-test exchange. No emulator.
 ---
 
-# ACT daily
+# ACT
 
 ACT is Tester Party (`kr.testerparty.tester_party`), the app where developers swap testers for
 Google Play closed tests (12 testers x 14 days). Each day it lists other developers' apps to open
@@ -13,20 +13,20 @@ that come with them.
 
 ## First run: ask, then save
 
-The preferences live in `~/.config/act-daily/config.json` (or `$ACT_CONFIG`), one per machine.
-If `python3 scripts/act_daily.py config` shows `display_name` or `accept_for` still `null`, ask
-the user these questions in one message, give the default for each, and save the answers with
-`config`. Don't ask again once saved; the user changes them by asking, and you rerun `config`.
+The preferences live in `~/.config/act-skill/config.json` (or `$ACT_CONFIG`), one per machine.
+If `python3 scripts/act.py config` shows `display_name` null or `accept_for` empty, ask the user
+these questions in one message, give the default for each, and save the answers with `config`.
+Don't ask again once saved; the user changes them by asking, and you rerun `config`.
 
 | Question | Key | Default |
 |---|---|---|
 | Which name should the other testers see when you join their Google Groups? | `display_name` | none: must be answered |
-| Which of your apps do you accept exchange requests for (as ACT shows it on a request: "→ <app>")? | `accept_for` | none: asked per `accept` run until saved |
+| Which of your apps do you accept exchange requests for (as ACT shows them on a request: "→ <app>")? One or several. | `accept_for` | none: asked per `accept` run until saved |
 | Largest app to install from the Play Store, in MB? Bigger ones are skipped and reported. 0 = no limit. | `max_app_size_mb` | 100 |
 | Seconds spent in each app of the Today list? | `seconds_per_app` | 25 |
 
 ```bash
-python3 scripts/act_daily.py config --display-name "Alex" --accept-for "My App" --max-app-size-mb 100
+python3 scripts/act.py config --display-name "Alex" --accept-for "My App, My Other App" --max-app-size-mb 100
 ```
 
 Fixed, not configurable: paid apps are **never** bought, and joining a group always unlinks the
@@ -35,29 +35,34 @@ Google profile and turns every group email off.
 ## Run it
 
 ```bash
-python3 scripts/act_daily.py                          # = today: every app of the Today list
-ACT_LIMIT=2 ACT_SECONDS=15 python3 scripts/act_daily.py today   # quick trial
-python3 scripts/act_daily.py accept                   # requests for accept_for only (or --for "<app>")
-python3 scripts/act_daily.py install                  # join group + opt in + install, every new card
+python3 scripts/act.py                         # = today: every app of the Today list
+python3 scripts/act.py accept                  # requests for accept_for only (or --for "<app>", repeatable)
+python3 scripts/act.py install                 # join group + opt in + install, every new card
+python3 scripts/act.py --dry-run install       # any command: report what it would do, change nothing
+ACT_LIMIT=2 ACT_SECONDS=15 python3 scripts/act.py today   # quick trial
 ```
 
-Run `today` in the background (15-20 min) and report the final line. Every subcommand keeps the
+The first time a user runs `accept` or `install`, offer a `--dry-run` first and show its report.
+Run `today` in the background (15-20 min) and report the final line. Every command keeps the
 screen on for the whole run (`svc power stayon usb`) and restores it at the end unless
 `ACT_KEEP_AWAKE=1`.
 
-**accept**: only requests whose card reads `→ <app>` are accepted. Requests for the user's other
-apps stay pending: never accept them unless the user names that app.
+**accept**: only requests whose card reads `→ <app>` for one of the named apps are accepted.
+Requests for the user's other apps stay pending, listed at the end: never accept them unless the
+user names that app. The list is scanned twice from the top if needed, so no card is missed.
 
 **install**: an app is on the Play Store only ~30 min after the opt-in ("Not found" / "Élément
 introuvable" before that is normal): run it once to join and opt in, then again 30+ min later to
-install. Skipped, and reported, never forced: a paid app (the page shows a price or a buy
-button: only an exact "Installer" / "Install" label is ever tapped), an app bigger than
+install. Skipped, and reported, never forced: a paid app (the page shows a price or a buy button:
+only an exact "Installer" / "Install" label is ever tapped), an app bigger than
 `max_app_size_mb`, an app "not available in your country". A card stuck on "not found" for a day
-is the developer's problem: the user reports it with ACT's "Un problème".
+is the developer's problem: the user reports it with ACT's "Un problème". The Today list's
+"A besoin de vous" rows ("Non installée sur ce téléphone") are these same cards: `install`
+handles them.
 
 Environment: `ACT_PIN` (the phone's unlock code, set by the user in their own shell — never ask
 them to paste it in the chat, never write it anywhere, never put it in the config), `ACT_LIMIT`,
-`ACT_KEEP_AWAKE=1`, `ACT_SHOTS` (failure screenshots, default `/tmp`), `ADB` (defaults to `adb` on
+`ACT_KEEP_AWAKE=1`, `ACT_DRY_RUN=1` (same as `--dry-run`), `ACT_SHOTS` (failure screenshots, default `/tmp`), `ADB` (defaults to `adb` on
 PATH, then `$ANDROID_HOME/platform-tools/adb`). `ACT_DISPLAY_NAME`, `ACT_ACCEPT_FOR`,
 `ACT_MAX_MB`, `ACT_SECONDS` override the config for one run.
 
@@ -74,7 +79,7 @@ Tested on a Pixel (1080x2424); the join form's taps scale with the screen.
 - ACT is Flutter, but its accessibility tree is complete: `uiautomator dump` exposes the tabs
   (`Aujourd'hui\nOnglet 2 sur 3`), the counter (`N restants · M faits`) and one `Ouvrir`
   button per row, the app name on the row's ImageView. Rows "Non installée sur ce téléphone"
-  (section "A besoin de vous") have no button: the user installs those from the Play Store.
+  (section "A besoin de vous") have no button: `install` handles them.
 - Tapping `Ouvrir` is what ACT validates; ACT starts the app through its launcher intent. The
   time spent in the app does not change ACT's count but is the engagement Play looks at.
 - ACT's counter lags: pull-to-refresh on the Today tab updates it. The script verifies each app

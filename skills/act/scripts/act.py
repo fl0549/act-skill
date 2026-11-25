@@ -35,6 +35,11 @@ def sh(cmd):
     return adb("shell", cmd)
 
 
+def dry():
+    """Dry run: report what would be done, change nothing (no Ouvrir, Accepter, join, install)."""
+    return os.environ.get("ACT_DRY_RUN") == "1"
+
+
 def log(msg):
     print(time.strftime("%H:%M:%S"), msg, flush=True)
 
@@ -218,6 +223,14 @@ def run_today():
     root = pull_to_refresh()
     c = counters(root)
     log(f"ACT today: {c[0]} remaining, {c[1]} done" if c else "ACT today: counter not found")
+    if dry():
+        names = []
+        for _ in range(4):
+            names += [nm for nm, _ in rows(root) if nm not in names]
+            scroll_list()
+            root = dump()
+        log(f"dry run: would open {len(names)} app(s), {SECONDS}s each: {names}")
+        return
     done, failed, skipped = [], [], set()
     while len(done) + len(failed) < LIMIT:
         root = open_act_today()
@@ -275,13 +288,15 @@ def main():
     import argparse
     ap = argparse.ArgumentParser(description="ACT (Tester Party) routines over adb")
     sub = ap.add_subparsers(dest="cmd")
+    ap.add_argument("--dry-run", action="store_true", help="show what would be done, change nothing")
     sub.add_parser("today", help="open every app of the Today list (default)")
-    p = sub.add_parser("accept", help="accept the pending exchange requests aimed at one of your apps")
-    p.add_argument("--for", dest="target", help='your app as ACT shows it (default: config accept_for)')
+    p = sub.add_parser("accept", help="accept the pending exchange requests aimed at your apps")
+    p.add_argument("--for", dest="target", action="append",
+                   help='one of your apps as ACT shows it; repeatable (default: config accept_for)')
     sub.add_parser("install", help="join group + opt in + install every app of the Installation section")
     p = sub.add_parser("config", help="show the preferences, or set them")
     p.add_argument("--display-name")
-    p.add_argument("--accept-for")
+    p.add_argument("--accept-for", help='comma-separated: "App One, App Two"')
     p.add_argument("--max-app-size-mb", type=int, help="0 = no limit")
     p.add_argument("--seconds-per-app", type=int)
     args = ap.parse_args()
@@ -291,12 +306,16 @@ def main():
         print(config.PATH)
         print(json.dumps(cfg, indent=2, ensure_ascii=False))
         return
+    if args.dry_run:
+        os.environ["ACT_DRY_RUN"] = "1"
     if args.cmd == "accept":
-        args.target = args.target or config.load()["accept_for"]
+        args.target = config.apps(args.target) or config.load()["accept_for"]
         if not args.target:
             sys.exit('which app? `accept --for "<your app>"` or `config --accept-for "<your app>"`')
     adb("wait-for-device", check=True)
     sh("svc power stayon usb")  # the phone must never lock during a run
+    if dry():
+        log("DRY RUN: nothing will be opened, accepted, joined or installed")
     try:
         unlock()
         if args.cmd == "accept":

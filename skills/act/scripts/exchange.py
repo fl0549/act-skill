@@ -15,7 +15,7 @@ import os
 import re
 import time
 
-import act_daily as a
+import act as a
 import cdp
 import config
 
@@ -77,8 +77,11 @@ def page_down():
 
 # ---------- accept ----------
 
-def accept(target):
-    """Accept every pending request whose card says '→ <target>'. Others are left untouched."""
+def accept(targets):
+    """Accept every pending request whose card says '→ <one of targets>'. Others are left untouched."""
+    targets = [targets] if isinstance(targets, str) else list(targets)
+    seen = set()  # dry run: cards already reported
+    others = set()  # pending requests for apps the user did not name: left alone
     open_personal()
     to_top()
     card = [n for n in a.dump().iter("node") if desc(n).startswith("Vos applications actuelles")]
@@ -86,8 +89,14 @@ def accept(target):
         raise SystemExit("'Vos applications actuelles' card not found")
     a.tap(*a.center(card[0]))
     time.sleep(5)
-    accepted, misses = [], 0
-    while misses < 6:
+    accepted, misses, passes, wanted = [], 0, 0, set()
+    while True:
+        if misses >= 6:  # bottom reached: go round once more if a matching card was missed
+            if passes >= 2 or not (wanted - set(accepted)):
+                break
+            passes += 1
+            misses = 0
+            to_top()
         nodes = list(a.dump().iter("node"))
         later = [n for n in nodes if desc(n) == "Plus tard"]
         if later:  # "The swap has started" sheet
@@ -99,8 +108,12 @@ def accept(target):
         hit = None
         for c in nodes:
             d = desc(c)
-            if "→" not in d or "Accepté" in d or f"→ {target}" not in d.replace("  ", " "):
+            if "→" not in d or "Accepté" in d or d.split("\n")[0] in seen:
                 continue
+            if not any(f"→ {t}" in d.replace("  ", " ") for t in targets):
+                others.add(d.split("\n")[0] + " →" + d.split("→", 1)[1].split("\n")[0])
+                continue
+            wanted.add(d.split("\n")[0])
             y1, y2 = a.bounds(c)[1], a.bounds(c)[3]
             for b in nodes:
                 if desc(b) == "Accepter" and b.get("enabled") == "true":
@@ -115,6 +128,11 @@ def accept(target):
             page_down()
             continue
         name, btn = hit
+        if a.dry():
+            a.log(f"dry run: would accept {name}")
+            seen.add(name)
+            accepted.append(name)
+            continue
         a.log(f"accept {name}")
         a.tap(*a.center(btn))
         for _ in range(10):  # wait for the sheet or the card to flip to "Accepté"
@@ -126,8 +144,9 @@ def accept(target):
         accepted.append(name)
         misses = 0
         to_top()
-    left = [desc(n) for n in a.dump().iter("node") if re.match(r"\d+ en attente", desc(n))]
-    a.log(f"accepted {len(accepted)} for {target}: {accepted}. Still pending: {left or ['0']}")
+    verb = "would accept" if a.dry() else "accepted"
+    a.log(f"{verb} {len(accepted)} for {targets}: {accepted}")
+    a.log(f"left pending (not your named apps): {len(others)} {sorted(others)}")
     return accepted
 
 
@@ -227,7 +246,7 @@ def fill_join_dialog():
 
 def join(handle):
     if not NAME:
-        return "no display name configured: run `act_daily.py config --display-name <name>`"
+        return "no display name configured: run `act.py config --display-name <name>`"
     pos = find_step(handle, STEP_JOIN)
     if not pos:
         return "join step not found"
@@ -306,15 +325,20 @@ def play_install(handle):
     if any(re.search(r"pas disponible dans votre pays|not available in your country", x, re.I) for x in t):
         a.sh("input keyevent KEYCODE_BACK")
         return "not available in this country (developer's side: report it in ACT)"
-    if any(x in ("Ouvrir", "Open", "Désinstaller", "Uninstall") for x in t):
-        return None  # already installed
     mb = play_size_mb(t)
+    size = f"{mb:.0f} MB" if mb is not None else "size not shown"
+    if any(x in ("Ouvrir", "Open", "Désinstaller", "Uninstall") for x in t):
+        a.sh("input keyevent KEYCODE_BACK")
+        return f"already installed ({size})"
     if MAX_MB and mb is None:
         a.sh("input keyevent KEYCODE_BACK")
         return f"size not shown, skipped (limit {MAX_MB} MB; screenshot {shot('play-size')})"
     if MAX_MB and mb > MAX_MB:
         a.sh("input keyevent KEYCODE_BACK")
         return f"too big: {mb:.0f} MB > {MAX_MB} MB, skipped"
+    if a.dry():
+        a.sh("input keyevent KEYCODE_BACK")
+        return f"dry run: would install ({size})"
     btn = [n for n in a.dump().iter("node")
            if (n.get("text") or desc(n)) in ("Installer", "Install")]  # the label; its parent is the button
     if not btn:
@@ -323,7 +347,7 @@ def play_install(handle):
     for _ in range(100):  # up to ~5 min for the download (games weigh hundreds of MB)
         time.sleep(3)
         if any(x in ("Ouvrir", "Open", "Jouer", "Play") for x in texts()):
-            return None
+            return f"installed ({size})"
     return f"install did not finish (screenshot {shot('play-wait')})"
 
 
@@ -334,6 +358,13 @@ def install():
     for handle, state in cards:
         label = handle
         err = None
+        if a.dry() and ("Groupe rejoint" not in state or "Opt-in fait" not in state):
+            todo = [s for s, k in (("join group", "Groupe rejoint"), ("opt in", "Opt-in fait")) if k not in state]
+            name = f' as "{NAME}"' if NAME else " (no display_name configured: would stop)"
+            err = f"dry run: would {' + '.join(todo)}{name if 'join group' in todo else ''}, then install"
+            a.log(f"    {label}: {err}")
+            report.append((label, err))
+            continue
         if "Groupe rejoint" not in state:
             a.log(f"> {label}: join group")
             err = join(handle)
@@ -343,7 +374,7 @@ def install():
         if not err:
             a.log(f"> {label}: install")
             err = play_install(handle)
-        a.log(f"    {label}: {'installed' if not err else err}")
-        report.append((label, err or "installed"))
+        a.log(f"    {label}: {err or 'done'}")
+        report.append((label, err or "done"))
     a.log("Install report: " + "; ".join(f"{h}: {r}" for h, r in report))
     return report

@@ -1,71 +1,131 @@
 # act-skill
 
-A [Claude Code](https://claude.com/claude-code) skill that runs the
-[Tester Party](https://play.google.com/store/apps/details?id=kr.testerparty.tester_party)
-("ACT") closed-test exchange for you, on your own Android phone plugged in over USB.
+Your daily [Tester Party](https://play.google.com/store/apps/details?id=kr.testerparty.tester_party)
+(ACT) routine, done by Claude Code on your own Android phone while you have coffee.
 
-Google Play asks new developer accounts for 12 testers over 14 days before production. Tester
-Party is where developers swap testers: every day you open each other's apps. That routine takes
-about 20 minutes by hand; this skill does it unattended.
+```text
+$ "do my ACT tests"
+09:02:11 ACT today: 27 remaining, 0 done
+09:02:15 > Pocket Recipes
+09:02:18     com.example.recipes: exploring 25s
+09:02:49     validated (1 done)
+09:02:52 > Habit Garden
+...
+09:19:40 Finished: 27 validated, 0 failed []. ACT: (0, 27)
 
-| Command | What it does |
-|---|---|
-| `today` | Opens every app of ACT's "Aujourd'hui" list through its "Ouvrir" button, uses it ~25 s inside its content area, kills it, and checks ACT counted it. |
-| `accept` | Accepts the pending exchange requests aimed at **one** of your apps. Requests for your other apps stay pending. |
-| `install` | For each new app: joins its Google Group, opts in as a tester, installs it from the Play Store. |
-| `config` | Shows or changes your preferences. |
+$ "install the new ACT apps"
+09:21:05 Installation: 4 card(s)
+09:21:40     Pixel Quest: installed (38 MB)
+09:22:31     Big Racer 3D: too big: 412 MB > 100 MB, skipped
+09:22:58     Pro Synth: paid app: skipped, never bought
+09:23:30     Daily Notes: not on the Play Store yet (retry ~30 min after the opt-in)
+```
 
-Just ask Claude: "do my ACT tests", "accept the ACT requests", "install the new ACT apps".
+Google Play asks new developer accounts for 12 testers over 14 days before production. On Tester
+Party, developers swap testers: every day you open each other's apps. By hand, that is 20 minutes
+every morning. With this skill, it is one sentence.
 
 ## Install
+
+In Claude Code:
 
 ```
 /plugin marketplace add fl0549/act-skill
 /plugin install act-skill@act-skill
+/reload-plugins
 ```
 
-Requirements: `adb` (Android platform-tools) on your PATH or under `$ANDROID_HOME`, Python 3.9+
-(standard library only), Tester Party installed and signed in on the phone, USB debugging on.
-
-## First run
-
-Claude asks four questions once and saves the answers in `~/.config/act-daily/config.json`:
-
-| Question | Default |
-|---|---|
-| Name shown to other testers when joining their Google Groups | none, required for `install` |
-| Your app to accept exchange requests for | none, asked until saved |
-| Largest app to install, in MB (0 = no limit) | 100 |
-| Seconds spent in each app of the Today list | 25 |
-
-Change any of them later by asking Claude, or:
+<details>
+<summary><strong>Prefer the terminal? Using Codex?</strong></summary>
 
 ```bash
-python3 skills/act-daily/scripts/act_daily.py config --max-app-size-mb 200
+claude plugin marketplace add fl0549/act-skill
+claude plugin install act-skill@act-skill
 ```
 
+Codex:
+
+```bash
+codex plugin marketplace add fl0549/act-skill
+codex plugin add act-skill@act-skill
+```
+
+Any other agent that reads `SKILL.md` skills: copy `skills/act/` into its skills folder.
+
+</details>
+
+**Updates:** Claude Code doesn't auto-update third-party plugins by default. Turn it on in
+`/plugin` → Marketplaces → act-skill → Enable auto-update, or run
+`claude plugin update act-skill@act-skill`.
+
+**You need:** an Android phone with USB debugging on, plugged into your computer; `adb`
+(Android platform-tools) on your PATH or under `$ANDROID_HOME`; Python 3.9+ (standard library
+only); Tester Party installed and signed in on the phone.
+
+## Use
+
+Just ask, in your own words:
+
+```text
+do my ACT tests
+accept the ACT requests
+install the new ACT apps
+show me what ACT install would do, without doing it
+raise the ACT app size limit to 200 MB
+```
+
+- **today**: opens every app of ACT's Today list through its "Ouvrir" button (that tap is what
+  ACT counts), uses each one ~25 s, closes it, and checks ACT counted it.
+- **accept**: accepts the pending exchange requests aimed at **your** apps, the ones you name.
+  Requests for your other apps stay pending and are listed.
+- **install**: for each new app, joins its Google Group, opts in as a tester and installs it from
+  the Play Store. Play needs about 30 minutes after the opt-in: run it again later for those.
+- **--dry-run**: any of the above reports what it would do and changes nothing. Claude offers one
+  the first time you run `accept` or `install`.
+
+## Your settings
+
+On the first run, Claude asks four questions and saves your answers in
+`~/.config/act-skill/config.json`. Change them any time by asking Claude.
+
+| Setting | Default |
+|---|---|
+| Name other testers see when you join their Google Groups | none, asked |
+| Your apps to accept exchange requests for (one or several) | none, asked |
+| Largest app to install | 100 MB (0 = no limit) |
+| Time spent in each app of the Today list | 25 s |
+
 If your phone has a lock code, set `ACT_PIN` in your own shell so a run can unlock it. It is
-read from the environment only: never written to the config, never sent anywhere.
+read from the environment only: never saved in the config, never sent anywhere.
 
 ## Safety
 
-- **Never pays.** A paid app is skipped; only an exact "Installer" / "Install" label is tapped.
-- Apps bigger than your size limit, or not available in your country, are skipped and reported.
-- Joining a Google Group always unlinks your Google profile and turns every group email off; the
-  form is submitted only after the page confirms those values.
-- While exploring other people's test builds it never types text, never taps buy / subscribe /
-  delete / logout / share / permission controls, and stays out of the status bar.
+The skill drives your phone, so here is exactly what it will and won't do.
+
+- **Never pays.** It only ever taps a button labelled exactly "Installer" / "Install". A paid
+  app shows a price instead and is skipped.
+- **Your privacy when joining groups.** It always unlinks your Google profile and turns every
+  group email off, and submits the form only after reading those values back from the page.
+  Anything unexpected: it stops on that app and leaves the form open with a screenshot.
+- **Other people's test builds.** While using them it never types text, never taps buy,
+  subscribe, delete, log out, share or permission controls, and stays out of the status bar and
+  quick settings. If an app hands off to another app, it goes back.
+- **Only what you named.** It accepts requests for the apps you named, nothing else, and installs
+  only what ACT lists for you, under your size limit.
+- **Local only.** Everything goes through `adb` over USB, plus Chrome's debugging port forwarded
+  to your computer to read the Google Groups and Play pages. No server, no account, no data
+  leaves your machine.
 - The screen is kept on during a run and restored afterwards.
 
 ## Limits
 
 - ACT is read in **French** (labels such as "Aujourd'hui", "Ouvrir", "Rejoindre le groupe de
-  testeurs"). With the phone in another language, those labels need translating in
-  `skills/act-daily/scripts/`.
-- Tested on one phone (1080x2424). The Google Groups form uses a few screen taps, scaled to the
-  screen size, then verified in the page before submitting.
-- Unofficial: not affiliated with Tester Party or Google. UI changes in either can break it.
+  testeurs"). With your phone in another language, those labels need translating in
+  `skills/act/scripts/`. Pull requests welcome.
+- Tested on one phone (1080x2424). The Google Groups form uses a few screen taps, scaled to your
+  screen size, then checked in the page before submitting.
+- Unofficial: not affiliated with Tester Party or Google. An update to either can break it.
 
 ## License
 
-MIT
+[MIT](LICENSE)
