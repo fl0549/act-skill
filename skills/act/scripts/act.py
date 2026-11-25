@@ -7,11 +7,17 @@ returns to ACT and checks that the "faits" counter went up.
 
 Env: ACT_PIN (optional, unlocks a locked phone), ACT_SECONDS (time per app, default 25),
 ACT_LIMIT (max apps this run, default all), ACT_KEEP_AWAKE=1 (leave "stay awake on USB" on at the end),
-ADB (adb binary; default: adb on PATH, then $ANDROID_HOME/platform-tools/adb).
+ADB (adb binary; default: adb on PATH, then $ANDROID_HOME/platform-tools/adb), ANDROID_SERIAL (which
+phone, when several are plugged in; read by adb itself).
+
+Exit code: 0 when everything went as expected, 1 when an app failed (not validated, unexpected
+install error), 2 when the run could not start (no phone, locked, ACT missing).
 """
 import json, os, random, re, shutil, subprocess, sys, time, xml.etree.ElementTree as ET
 
-ACT = "kr.testerparty.tester_party"
+import labels as L
+
+ACT = L.ACT_PACKAGE
 ADB = os.environ.get("ADB") or shutil.which("adb") or os.path.join(os.environ.get("ANDROID_HOME", ""), "platform-tools", "adb")
 import config
 SECONDS = int(config.load()["seconds_per_app"])
@@ -33,6 +39,41 @@ def adb(*a, check=False):
 
 def sh(cmd):
     return adb("shell", cmd)
+
+
+def fail(msg):
+    """The run cannot start or go on: say why, exit 2."""
+    print(time.strftime("%H:%M:%S"), msg, file=sys.stderr, flush=True)
+    sys.exit(2)
+
+
+def check_device():
+    """Exactly one phone, or ANDROID_SERIAL naming one; Tester Party installed."""
+    lines = adb("devices").strip().splitlines()[1:]
+    devices = [l.split()[0] for l in lines if l.strip().endswith("device")]
+    others = [l for l in lines if l.strip() and not l.strip().endswith("device")]
+    serial = os.environ.get("ANDROID_SERIAL")
+    if serial and serial not in devices:
+        fail(f"ANDROID_SERIAL={serial} is not connected. Connected: {devices or 'none'}")
+    if not serial:
+        if not devices:
+            hint = f" ({'; '.join(others)}: accept the USB debugging prompt on the phone)" if others else ""
+            fail(f"No phone found over adb{hint}. Plug it in with USB debugging on.")
+        if len(devices) > 1:
+            fail(f"Several phones connected: {devices}. Pick one: export ANDROID_SERIAL=<serial>")
+    m = re.search(r"versionName=(\S+)", sh(f"dumpsys package {ACT} | grep -m1 versionName"))
+    if not m:
+        fail("Tester Party (ACT) is not installed on this phone.")
+    if m.group(1) != L.TESTED_ACT_VERSION:
+        log(f"warning: ACT {m.group(1)} installed, the skill was tested with {L.TESTED_ACT_VERSION}. "
+            f"If a screen isn't found, ACT's interface changed: see scripts/labels.py")
+
+
+def launch(pkg):
+    """Start an app from its launcher activity (one intent, no random events)."""
+    out = sh(f"cmd package resolve-activity --brief -c android.intent.category.LAUNCHER {pkg}").strip().splitlines()
+    if out and "/" in out[-1]:
+        sh(f"am start -n {out[-1].strip()}")
 
 
 def dry():
@@ -105,7 +146,7 @@ def unlock():
         sh("input keyevent KEYCODE_ENTER")
         time.sleep(1.5)
     if is_locked():
-        sys.exit("Phone is locked: unlock it, or set ACT_PIN.")
+        fail("Phone is locked: unlock it, or set ACT_PIN.")
 
 
 # ---------- ACT ----------
@@ -117,9 +158,8 @@ def open_act_today():
         root = dump()
         if root is None:
             continue
-        tests = [n for n in root.iter() if (n.get("content-desc") or "").startswith("Tests\nOnglet")
-                 or re.search(r"\nTests\nOnglet", n.get("content-desc") or "")]
-        today = [n for n in root.iter() if (n.get("content-desc") or "").startswith("Aujourd'hui\nOnglet")]
+        tests = [n for n in root.iter() if re.search(L.TAB_TESTS, n.get("content-desc") or "")]
+        today = [n for n in root.iter() if (n.get("content-desc") or "").startswith(L.TAB_TODAY)]
         if not today and tests:
             tap(*center(tests[0]))
             continue
@@ -129,7 +169,7 @@ def open_act_today():
                 time.sleep(1.2)
                 root = dump()
             return root
-    sys.exit("Could not reach ACT > Tests > Aujourd'hui")
+    fail("Could not reach ACT > Tests > Aujourd'hui (ACT's interface changed? see scripts/labels.py)")
 
 
 def pull_to_refresh():
@@ -143,7 +183,7 @@ def pull_to_refresh():
 
 def counters(root):
     for n in root.iter():
-        m = re.search(r"(\d+) restants · (\d+) faits", n.get("content-desc") or "")
+        m = re.search(L.TODAY_COUNTER, n.get("content-desc") or "")
         if m:
             return int(m.group(1)), int(m.group(2))
     return None
@@ -154,7 +194,7 @@ def rows(root):
     nodes = list(root.iter("node"))
     out = []
     for i, n in enumerate(nodes):
-        if n.get("content-desc") == "Ouvrir" and n.get("class", "").endswith("Button"):
+        if n.get("content-desc") == L.OPEN and n.get("class", "").endswith("Button"):
             by = center(n)[1]
             name = next((m.get("content-desc") for m in reversed(nodes[:i])
                          if m.get("class", "").endswith("ImageView") and bounds(m)[1] <= by <= bounds(m)[3]), "?")
@@ -185,7 +225,7 @@ def explore(pkg, seconds):
                 sh("input keyevent KEYCODE_BACK")  # dismiss a system dialog, deny a permission
             else:
                 log(f"    left to {cur}, back to {pkg}")
-                sh(f"monkey -p {pkg} -c android.intent.category.LAUNCHER 1")
+                launch(pkg)
             time.sleep(2)
             continue
         r = random.random()
@@ -230,7 +270,7 @@ def run_today():
             scroll_list()
             root = dump()
         log(f"dry run: would open {len(names)} app(s), {SECONDS}s each: {names}")
-        return
+        return 0
     done, failed, skipped = [], [], set()
     while len(done) + len(failed) < LIMIT:
         root = open_act_today()
@@ -282,6 +322,7 @@ def run_today():
     open_act_today()
     c = counters(pull_to_refresh())
     log(f"Finished: {len(done)} validated, {len(failed)} failed {failed}. ACT: {c}")
+    return len(failed)
 
 
 def main():
@@ -312,10 +353,11 @@ def main():
         args.target = config.apps(args.target) or config.load()["accept_for"]
         if not args.target:
             sys.exit('which app? `accept --for "<your app>"` or `config --accept-for "<your app>"`')
-    adb("wait-for-device", check=True)
+    check_device()
     sh("svc power stayon usb")  # the phone must never lock during a run
     if dry():
         log("DRY RUN: nothing will be opened, accepted, joined or installed")
+    failures = 0
     try:
         unlock()
         if args.cmd == "accept":
@@ -323,11 +365,12 @@ def main():
             exchange.accept(args.target)
         elif args.cmd == "install":
             import exchange
-            exchange.install()
+            failures = exchange.install()
         else:
-            run_today()
+            failures = run_today()
     finally:
         sh("svc power stayon false") if os.environ.get("ACT_KEEP_AWAKE") != "1" else None
+    sys.exit(1 if failures else 0)
 
 
 if __name__ == "__main__":

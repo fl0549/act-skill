@@ -60,7 +60,10 @@ Any other agent that reads `SKILL.md` skills: copy `skills/act/` into its skills
 
 **You need:** an Android phone with USB debugging on, plugged into your computer; `adb`
 (Android platform-tools) on your PATH or under `$ANDROID_HOME`; Python 3.9+ (standard library
-only); Tester Party installed and signed in on the phone.
+only); Tester Party installed and signed in on the phone; **Chrome as the phone's default
+browser** (joining groups and opting in happen in Chrome; with another browser the skill says so
+and leaves those apps to you). Several phones plugged in: pick one with
+`export ANDROID_SERIAL=<serial>` (from `adb devices`).
 
 ## Use
 
@@ -98,6 +101,13 @@ On the first run, Claude asks four questions and saves your answers in
 If your phone has a lock code, set `ACT_PIN` in your own shell so a run can unlock it. It is
 read from the environment only: never saved in the config, never sent anywhere.
 
+## Before you use it
+
+Tester Party exists so developers test each other's apps for real, and Google asks closed tests
+to be real tests. Automating the routine may go against Tester Party's rules or Google Play's
+expectations, and it is your account, not this project's, that takes that risk. Read their
+terms, use it on your own judgment, and give real feedback on the apps you care about.
+
 ## Safety
 
 The skill drives your phone, so here is exactly what it will and won't do.
@@ -106,7 +116,8 @@ The skill drives your phone, so here is exactly what it will and won't do.
   app shows a price instead and is skipped.
 - **Your privacy when joining groups.** It always unlinks your Google profile and turns every
   group email off, and submits the form only after reading those values back from the page.
-  Anything unexpected: it stops on that app and leaves the form open with a screenshot.
+  Anything unexpected: it stops on that app and leaves the form open with a screenshot. Groups
+  that need their owner's approval get a join request with the same settings.
 - **Other people's test builds.** While using them it never types text, never taps buy,
   subscribe, delete, log out, share or permission controls, and stays out of the status bar and
   quick settings. If an app hands off to another app, it goes back.
@@ -117,14 +128,32 @@ The skill drives your phone, so here is exactly what it will and won't do.
   leaves your machine.
 - The screen is kept on during a run and restored afterwards.
 
+## Running it on a schedule
+
+`act.py` runs without Claude too, so cron or launchd can start it every morning:
+
+```bash
+python3 skills/act/scripts/act.py today && python3 skills/act/scripts/act.py install
+```
+
+Exit code `0`: everything went as expected (skipping a paid or too-big app is expected). `1`: an
+app failed, check the log. `2`: the run could not start (no phone, several phones, phone locked,
+Tester Party missing).
+
 ## Limits
 
-- ACT is read in **French** (labels such as "Aujourd'hui", "Ouvrir", "Rejoindre le groupe de
-  testeurs"). With your phone in another language, those labels need translating in
-  `skills/act/scripts/`. Pull requests welcome.
-- Tested on one phone (1080x2424). The Google Groups form uses a few screen taps, scaled to your
-  screen size, then checked in the page before submitting.
+- ACT is read in **French**. Every label the scripts read lives in one file,
+  [`skills/act/scripts/labels.py`](skills/act/scripts/labels.py): translating its ACT section is
+  all a phone in another language needs. Pull requests welcome.
+- Tested with Tester Party 1.7.113. With another version the skill warns you; if ACT changed a
+  screen, `labels.py` is where to look.
+- Tested on one phone. Web pages are driven through the page itself (fields and buttons found by
+  role and text), so the screen size doesn't matter there.
 - Unofficial: not affiliated with Tester Party or Google. An update to either can break it.
+
+## Changes
+
+See [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 

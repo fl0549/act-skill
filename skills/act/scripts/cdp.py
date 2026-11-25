@@ -38,3 +38,17 @@ class Tab:
     def js(self, expr):
         r = self.call("Runtime.evaluate", expression=expr, returnByValue=True, awaitPromise=True)
         return r.get("result", {}).get("value", r)
+    def click(self, finder):
+        """Real mouse click on the element a JS expression returns (null: nothing clicked).
+        Coordinates come from the page itself, so it works on any screen size."""
+        r = self.js("(() => { const e = (%s); if (!e) return null; e.scrollIntoView({block: 'center'});"
+                    " const b = e.getBoundingClientRect(); return {x: b.x + b.width / 2, y: b.y + b.height / 2}; })()"
+                    % finder)
+        if not isinstance(r, dict):
+            return False
+        for kind in ("mouseMoved", "mousePressed", "mouseReleased"):
+            self.call("Input.dispatchMouseEvent", type=kind, x=r["x"], y=r["y"], button="left", clickCount=1)
+        return True
+    def type(self, text):
+        """Types into the focused field like a keyboard would (real input events)."""
+        self.call("Input.insertText", text=text)

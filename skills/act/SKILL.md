@@ -66,13 +66,20 @@ them to paste it in the chat, never write it anywhere, never put it in the confi
 PATH, then `$ANDROID_HOME/platform-tools/adb`). `ACT_DISPLAY_NAME`, `ACT_ACCEPT_FOR`,
 `ACT_MAX_MB`, `ACT_SECONDS` override the config for one run.
 
-Before running: `adb devices` shows one phone in `device` state. If the script exits with
+Before running: `adb devices` shows one phone in `device` state (several: set `ANDROID_SERIAL`;
+the script refuses to guess). Exit code 0 = as expected, 1 = an app failed, 2 = could not start;
+report a non-zero exit to the user with the log lines that explain it. If the script exits with
 "Phone is locked", either `ACT_PIN` is unset or the phone just rebooted: ask the user to unlock
 it (the screen then stays on while on USB).
 
-Limits: ACT's interface is read in **French** (labels like "Aujourd'hui", "Ouvrir", "Rejoindre le
-groupe de testeurs"); a phone in another language needs those labels translated in the scripts.
-Tested on a Pixel (1080x2424); the join form's taps scale with the screen.
+Limits: ACT's interface is read in **French**; every label is in `scripts/labels.py`, the only
+file to translate for another phone language. Tested with ACT 1.7.113: the script warns on another
+version. The web steps need Chrome as the default browser; with another browser the card is
+reported and left to the user. A group needing its owner's approval gets a join request (same
+settings); run `install` again once approved.
+
+Tell the user, the first time, that automating the exchange may go against Tester Party's rules
+or Google Play's expectations, at their own account's risk (README, "Before you use it").
 
 ## How it works (what was learned on the device)
 
@@ -110,9 +117,12 @@ and the TWA wrapper.
 - Google Groups and the Play opt-in page open in Chrome, whose web content is **not** in the
   accessibility tree. `exchange.py` drives them through the Chrome DevTools protocol over adb
   (`adb forward tcp:9222 localabstract:chrome_devtools_remote`, stdlib client in `cdp.py`):
-  buttons are clicked by their text, and the join form is submitted only after the page confirms
-  name = `display_name`, every checkbox off and "Aucun e-mail". Anything else: stop on that
+  fields and buttons are found in the page by role and text and clicked at the position the page
+  reports (real mouse events, real typing), and the join form is submitted only after the page
+  confirms name = `display_name`, every checkbox off and "no email". Anything else: stop on that
   card, leave the form open, screenshot.
-- In the join form, Escape cancels the dialog: close the keyboard by tapping the title.
+- Chrome publishes its debugging socket only while it is in the foreground (it is, right after
+  ACT opened the page): `open_web_step` retries for 10 s.
+- In the join form, Escape cancels the dialog.
 - Never accept, join or opt in for something the user didn't ask for, and never open a join form on an
   unrelated group to "test" the script.
