@@ -1,0 +1,6 @@
+{
+  "name": "act-skill",
+  "owner": { "name": "fl0549" },
+  "metadata": { "description": "Automates the ACT (Tester Party) closed-test exchange on a USB-connected Android phone over adb: daily app opens, accepting exchange requests, joining tester groups and installing apps." },
+  "plugins": [ { "name": "act-skill", "source": "./", "description": "Automates the ACT (Tester Party) closed-test exchange on a USB-connected Android phone over adb: daily app opens, accepting exchange requests, joining tester groups and installing apps." } ]
+}
