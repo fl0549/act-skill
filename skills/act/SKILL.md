@@ -1,6 +1,6 @@
 ---
 name: act
-description: Run the ACT (Tester Party) closed-test exchange on a USB-connected Android phone over adb. `today` opens every app of ACT's "Aujourd'hui" list (~25 s each) and checks ACT counted it; `accept` accepts the pending exchange requests aimed at the user's own apps only; `install` joins each new app's Google Group, opts in and installs it from the Play Store (free apps under a size limit only). Every command has a `--dry-run`. Use when the user says "do my ACT tests", "run ACT", "accept the ACT requests", "install the new ACT apps", "fais ACT", "lance ACT", "fais mes tests ACT du jour", "accepte les demandes", "installe les nouvelles apps", or anything about the Tester Party closed-test exchange. No emulator.
+description: Run the ACT (Tester Party) closed-test exchange on a USB-connected Android phone over adb. `today` opens every app of ACT's "Aujourd'hui" list (~25 s each) and checks ACT counted it; `accept` accepts the pending exchange requests aimed at the user's own apps only; `install` joins each new app's Google Group, opts in and installs it from the Play Store (free apps under a size limit only). Every command has a `--dry-run`. Use only when the request names ACT or Tester Party, or is clearly about the Google Play closed-testing tester exchange (12 testers, 14 days): "do my ACT tests", "run ACT", "accept the ACT requests", "install the new ACT apps", "Tester Party", "fais mes tests ACT", "lance ACT", "accepte les demandes ACT", "installe les nouvelles apps ACT". Not for generic "accept the requests" or "install the apps" without ACT in context. No emulator.
 ---
 
 # ACT
@@ -10,6 +10,9 @@ Google Play closed tests (12 testers x 14 days). Each day it lists other develop
 once; opening them is what keeps the user's own testers coming back. This skill runs that
 routine unattended (~17 min for ~27 apps), accepts new exchange requests and installs the apps
 that come with them.
+
+Paths below (`scripts/act.py`) are relative to this skill's directory, the folder holding this
+SKILL.md: run them from there (or prefix that folder), not from the user's project.
 
 ## First run: ask, then save
 
@@ -43,6 +46,9 @@ ACT_LIMIT=2 ACT_SECONDS=15 python3 scripts/act.py today   # quick trial
 ```
 
 The first time a user runs `accept` or `install`, offer a `--dry-run` first and show its report.
+Not yet exercised on real pages, so watch the first live run closely and show the user the
+screenshot if it stops: the Google Groups join (validated only on a local copy of the form)
+and a real `accept` tap (validated in dry run). `--dry-run` also works after the command name.
 Run `today` in the background (15-20 min) and report the final line. Every command keeps the
 screen on for the whole run (`svc power stayon usb`) and restores it at the end unless
 `ACT_KEEP_AWAKE=1`.

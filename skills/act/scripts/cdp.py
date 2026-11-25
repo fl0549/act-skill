@@ -1,8 +1,34 @@
 """Minimal Chrome DevTools client over adb (stdlib only)."""
 import base64, json, os, socket, struct, subprocess, urllib.request
-PORT = 9222
+PORT = None  # a free local port, picked by adb on the first forward()
+
+
+class CDPError(RuntimeError):
+    """A DevTools call or a page script failed: never read as success."""
+
+
 def forward(adb="adb"):
-    subprocess.run([adb, "forward", f"tcp:{PORT}", "localabstract:chrome_devtools_remote"], capture_output=True)
+    """Forward a free local port to the phone's Chrome (never a fixed port another browser may use)."""
+    global PORT
+    if PORT:
+        listed = subprocess.run([adb, "forward", "--list"], capture_output=True, text=True).stdout
+        if f"tcp:{PORT} localabstract:chrome_devtools_remote" in listed:
+            return
+    out = subprocess.run([adb, "forward", "tcp:0", "localabstract:chrome_devtools_remote"],
+                         capture_output=True, text=True).stdout.strip()
+    if not out.isdigit():
+        raise OSError("adb could not forward Chrome's debugging socket")
+    PORT = int(out)
+
+
+def unforward(adb="adb"):
+    """Remove the forward at the end of a run: the phone's Chrome stops being reachable."""
+    global PORT
+    if PORT:
+        subprocess.run([adb, "forward", "--remove", f"tcp:{PORT}"], capture_output=True)
+        PORT = None
+
+
 def tabs():
     return json.load(urllib.request.urlopen(f"http://127.0.0.1:{PORT}/json/list"))
 class Tab:
@@ -34,10 +60,16 @@ class Tab:
         self.id += 1; self._send(json.dumps({"id": self.id, "method": method, "params": params}))
         while True:
             r = json.loads(self._recv())
-            if r.get("id") == self.id: return r.get("result", r.get("error"))
+            if r.get("id") == self.id:
+                if "error" in r:
+                    raise CDPError(f"{method}: {r['error'].get('message', r['error'])}")
+                return r.get("result", {})
     def js(self, expr):
         r = self.call("Runtime.evaluate", expression=expr, returnByValue=True, awaitPromise=True)
-        return r.get("result", {}).get("value", r)
+        if "exceptionDetails" in r:
+            d = r["exceptionDetails"]
+            raise CDPError(f"page script failed: {d.get('exception', {}).get('description', d.get('text'))}")
+        return r.get("result", {}).get("value")
     def click(self, finder):
         """Real mouse click on the element a JS expression returns (null: nothing clicked).
         Coordinates come from the page itself, so it works on any screen size."""

@@ -1,9 +1,20 @@
 {
   "name": "act-skill",
   "description": "Automates the ACT (Tester Party) closed-test exchange on a USB-connected Android phone over adb: daily app opens, accepting exchange requests, joining tester groups and installing apps.",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "author": {
     "name": "fl0549"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "homepage": "https://github.com/fl0549/act-skill",
+  "repository": "https://github.com/fl0549/act-skill",
+  "keywords": [
+    "tester-party",
+    "google-play",
+    "closed-testing",
+    "android",
+    "adb",
+    "automation",
+    "skill"
+  ]
 }

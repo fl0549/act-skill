@@ -13,7 +13,7 @@ phone, when several are plugged in; read by adb itself).
 Exit code: 0 when everything went as expected, 1 when an app failed (not validated, unexpected
 install error), 2 when the run could not start (no phone, locked, ACT missing).
 """
-import json, os, random, re, shutil, subprocess, sys, time, xml.etree.ElementTree as ET
+import json, os, random, re, shutil, signal, subprocess, sys, time, xml.etree.ElementTree as ET
 
 import labels as L
 
@@ -31,9 +31,12 @@ AVOID = re.compile(r"achet|buy|purchas|subscri|abonn|premium|upgrade|\bpro\b|pay
 
 
 def adb(*a, check=False):
-    r = subprocess.run([ADB, *a], capture_output=True, text=True)
+    try:  # UTF-8 whatever the OS locale: ACT's labels carry accents and arrows
+        r = subprocess.run([ADB, *a], capture_output=True, text=True, encoding="utf-8", errors="replace")
+    except FileNotFoundError:
+        fail(f"adb not found ({ADB}). Install Android platform-tools, put adb on PATH, or set ADB / ANDROID_HOME.")
     if check and r.returncode:
-        sys.exit(f"adb {' '.join(a)} failed: {r.stderr.strip()}")
+        fail(f"adb {' '.join(a)} failed: {r.stderr.strip()}")
     return r.stdout
 
 
@@ -91,7 +94,11 @@ def focus_pkg():
 
 
 def screen():
-    w, h = map(int, re.search(r"(\d+)x(\d+)", sh("wm size")).groups())
+    """The size apps are drawn at: the override when one is set ("Override size" comes last)."""
+    sizes = re.findall(r"(\d+)x(\d+)", sh("wm size"))
+    if not sizes:
+        fail("could not read the screen size (wm size)")
+    w, h = map(int, sizes[-1])
     return w, h
 
 
@@ -106,7 +113,7 @@ def dump():
             except ET.ParseError:
                 pass
         time.sleep(0.7)
-    return None
+    return ET.Element("hierarchy")  # unreadable screen (animation): an empty one, never None
 
 
 def bounds(n):
@@ -213,27 +220,55 @@ def scroll_list(down=True):
 
 # ---------- exploring an app ----------
 
+SYSTEM_DIALOGS = ("android", "com.android.vending", "com.google.android.gms")
+
+
+def keyboard_shown():
+    return "mInputShown=true" in sh("dumpsys input_method | grep mInputShown")
+
+
+def home_package():
+    out = sh("cmd package resolve-activity --brief -a android.intent.action.MAIN "
+             "-c android.intent.category.HOME").strip().splitlines()
+    return out[-1].split("/")[0] if out and "/" in out[-1] else None
+
+
+def not_an_app(pkg, home):
+    """Packages that are never the app ACT just opened: the launcher, system UI, settings."""
+    return pkg in (home, "com.android.systemui", "com.android.settings")
+
+
 def explore(pkg, seconds):
+    """Use the app like a tester: tap its own accessible controls (never AVOID ones, never text
+    fields), scroll. Blind taps only in apps that expose no control at all (game engines), and
+    never while a keyboard is up: a blind tap can't read what it lands on."""
     W, H = screen()
     top, bottom = int(H * .10), int(H * .93)  # never the status bar / gesture bar
     tapped = set()
+    blind_ok = False  # set by a dump that showed the app with zero clickable nodes
     t_end = time.time() + seconds
     while time.time() < t_end:
         cur = focus_pkg()
         if cur and cur != pkg:
-            if cur in ("android", "com.android.vending") or "permissioncontroller" in cur:
-                sh("input keyevent KEYCODE_BACK")  # dismiss a system dialog, deny a permission
+            if cur in SYSTEM_DIALOGS or "permissioncontroller" in cur:
+                sh("input keyevent KEYCODE_BACK")  # dismiss a system dialog, a payment sheet, a permission
             else:
                 log(f"    left to {cur}, back to {pkg}")
                 launch(pkg)
             time.sleep(2)
             continue
+        if keyboard_shown():  # a text field got focus: close the keyboard, never type
+            sh("input keyevent KEYCODE_BACK")
+            time.sleep(1)
+            continue
         r = random.random()
-        root = dump() if r < .65 else None
         cands = []
-        if root is not None:
-            for n in root.iter("node"):
-                if n.get("package") != pkg or n.get("clickable") != "true" or n.get("enabled") == "false":
+        if r < .65:
+            root = dump()
+            own = [n for n in root.iter("node") if n.get("package") == pkg]
+            blind_ok = bool(own) and not any(n.get("clickable") == "true" for n in own)
+            for n in own:
+                if n.get("clickable") != "true" or n.get("enabled") == "false":
                     continue
                 x1, y1, x2, y2 = bounds(n)
                 if y1 < top or y2 > bottom or x2 - x1 < 20 or (x2 - x1) * (y2 - y1) > W * H * .5:
@@ -247,36 +282,47 @@ def explore(pkg, seconds):
             key, n = random.choice(cands)
             tapped.add(key)
             tap(*center(n))
-        elif r < .85:
+        elif r < .85 or not blind_ok:
             # scroll the content a bit
             y = random.randint(int(H * .55), int(H * .75))
             dy = random.choice([-1, 1]) * random.randint(int(H * .2), int(H * .35))
             sh(f"input swipe {W//2} {y} {W//2} {y + dy} 400")
         else:
-            # no accessible controls (game engine): tap the middle of the screen
+            # the app exposes no control (game engine): tap the middle of the screen
             tap(random.randint(int(W * .2), int(W * .8)), random.randint(int(H * .3), int(H * .8)))
         time.sleep(random.uniform(1.5, 3))
+
+
+def all_row_names():
+    """Every app still in the Today list, scrolling through it (the list can be longer than a screen)."""
+    root = pull_to_refresh()
+    names, idle = [], 0
+    while idle < 2:
+        new = [nm for nm, _ in rows(root) if nm not in names]
+        names += new
+        idle = 0 if new else idle + 1
+        scroll_list()
+        root = dump()
+    return names
 
 
 def run_today():
     open_act_today()
     root = pull_to_refresh()
     c = counters(root)
-    log(f"ACT today: {c[0]} remaining, {c[1]} done" if c else "ACT today: counter not found")
+    log(f"ACT today: {c[0]} remaining, {c[1]} done" if c
+        else "ACT today: no counter shown (ACT hides it once every app of the day is done)")
     if dry():
-        names = []
-        for _ in range(4):
-            names += [nm for nm, _ in rows(root) if nm not in names]
-            scroll_list()
-            root = dump()
+        names = all_row_names()
         log(f"dry run: would open {len(names)} app(s), {SECONDS}s each: {names}")
         return 0
+    home = home_package()
     done, failed, skipped = [], [], set()
     while len(done) + len(failed) < LIMIT:
         root = open_act_today()
         todo = [(nm, b) for nm, b in rows(root) if nm not in skipped]
         scrolls = 0
-        while not todo and scrolls < 4:
+        while not todo and scrolls < 8:
             scroll_list()
             root = dump()
             todo = [(nm, b) for nm, b in rows(root) if nm not in skipped]
@@ -291,9 +337,9 @@ def run_today():
         for _ in range(12):
             time.sleep(1)
             p = focus_pkg()
-            if p in ("android", "com.android.vending", "com.google.android.gms") or "permissioncontroller" in (p or ""):
+            if p in SYSTEM_DIALOGS or "permissioncontroller" in (p or ""):
                 sh("input keyevent KEYCODE_BACK")  # system dialog over the app: dismiss, wait for the app
-            elif p and p != ACT:
+            elif p and p != ACT and not not_an_app(p, home):
                 pkg = p
                 break
         if not pkg:
@@ -304,18 +350,17 @@ def run_today():
         log(f"    {pkg}: exploring {SECONDS}s")
         explore(pkg, SECONDS)
         sh(f"am force-stop {pkg}")
-        if pkg == "com.android.chrome":  # web app (TWA): also stop its wrapper
-            for p in sh("pm list packages -3 twa").split():
-                sh(f"am force-stop {p.removeprefix('package:')}")
-        # ACT refreshes its counter a few seconds late: wait for it, or for the row to go.
+        # ACT refreshes its counter a few seconds late: wait for it to go up.
         ok, after = False, None
         for i in range(6):
             r = open_act_today() if i == 0 else pull_to_refresh()
             after = counters(r)
-            if (after and before and after[1] > before[1]) or name not in [nm for nm, _ in rows(r)]:
+            if after and before and after[1] > before[1]:
                 ok = True
                 break
             time.sleep(2)
+        if not ok and name not in all_row_names():  # no counter, but gone from the whole list
+            ok = True
         log(f"    validated ({after[1] if after else '?'} done)" if ok else f"    NOT validated (counter {before} -> {after})")
         (done if ok else failed).append(name)
         skipped.add(name)
@@ -328,13 +373,18 @@ def run_today():
 def main():
     import argparse
     ap = argparse.ArgumentParser(description="ACT (Tester Party) routines over adb")
-    sub = ap.add_subparsers(dest="cmd")
     ap.add_argument("--dry-run", action="store_true", help="show what would be done, change nothing")
-    sub.add_parser("today", help="open every app of the Today list (default)")
-    p = sub.add_parser("accept", help="accept the pending exchange requests aimed at your apps")
+    sub = ap.add_subparsers(dest="cmd")
+    def command(name, help):  # every command also takes --dry-run after its name
+        p = sub.add_parser(name, help=help)
+        p.add_argument("--dry-run", dest="dry_run_cmd", action="store_true",
+                       help="show what would be done, change nothing")
+        return p
+    command("today", "open every app of the Today list (default)")
+    p = command("accept", "accept the pending exchange requests aimed at your apps")
     p.add_argument("--for", dest="target", action="append",
                    help='one of your apps as ACT shows it; repeatable (default: config accept_for)')
-    sub.add_parser("install", help="join group + opt in + install every app of the Installation section")
+    command("install", "join group + opt in + install every app of the Installation section")
     p = sub.add_parser("config", help="show the preferences, or set them")
     p.add_argument("--display-name")
     p.add_argument("--accept-for", help='comma-separated: "App One, App Two"')
@@ -347,13 +397,16 @@ def main():
         print(config.PATH)
         print(json.dumps(cfg, indent=2, ensure_ascii=False))
         return
-    if args.dry_run:
+    if args.dry_run or getattr(args, "dry_run_cmd", False):
         os.environ["ACT_DRY_RUN"] = "1"
     if args.cmd == "accept":
         args.target = config.apps(args.target) or config.load()["accept_for"]
         if not args.target:
-            sys.exit('which app? `accept --for "<your app>"` or `config --accept-for "<your app>"`')
+            fail('which app? `accept --for "<your app>"` or `config --accept-for "<your app>"`')
     check_device()
+    # Keep the screen on for the run, then put back the user's own setting (not just "off").
+    stay_on = sh("settings get global stay_on_while_plugged_in").strip()
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(1))  # a stopped run still restores it
     sh("svc power stayon usb")  # the phone must never lock during a run
     if dry():
         log("DRY RUN: nothing will be opened, accepted, joined or installed")
@@ -362,14 +415,17 @@ def main():
         unlock()
         if args.cmd == "accept":
             import exchange
-            exchange.accept(args.target)
+            failures = exchange.accept(args.target)
         elif args.cmd == "install":
             import exchange
             failures = exchange.install()
         else:
             failures = run_today()
     finally:
-        sh("svc power stayon false") if os.environ.get("ACT_KEEP_AWAKE") != "1" else None
+        if os.environ.get("ACT_KEEP_AWAKE") != "1":
+            sh(f"settings put global stay_on_while_plugged_in {stay_on if stay_on.isdigit() else 0}")
+        if "cdp" in sys.modules:
+            sys.modules["cdp"].unforward(ADB)
     sys.exit(1 if failures else 0)
 
 

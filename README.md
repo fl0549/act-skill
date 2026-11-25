@@ -118,22 +118,31 @@ The skill drives your phone, so here is exactly what it will and won't do.
   group email off, and submits the form only after reading those values back from the page.
   Anything unexpected: it stops on that app and leaves the form open with a screenshot. Groups
   that need their owner's approval get a join request with the same settings.
-- **Other people's test builds.** While using them it never types text, never taps buy,
-  subscribe, delete, log out, share or permission controls, and stays out of the status bar and
-  quick settings. If an app hands off to another app, it goes back.
-- **Only what you named.** It accepts requests for the apps you named, nothing else, and installs
-  only what ACT lists for you, under your size limit.
+- **Other people's test builds.** While using them it taps only the app's own controls, never
+  text fields or buy, subscribe, delete, log out, share or permission controls, and stays out of
+  the status bar and quick settings. If a keyboard opens it closes it, so it never types. Taps
+  without reading the screen happen only in apps that expose no control at all (game engines);
+  a payment sheet, should one open, is dismissed at once. If an app hands off to another app, it
+  goes back.
+- **Only what you named.** It accepts requests for the apps you named, by exact name ("Notes"
+  never matches "Notes Pro"), nothing else, and installs only what ACT lists for you, under your
+  size limit.
 - **Local only.** Everything goes through `adb` over USB, plus Chrome's debugging port forwarded
-  to your computer to read the Google Groups and Play pages. No server, no account, no data
-  leaves your machine.
-- The screen is kept on during a run and restored afterwards.
+  to a free local port of your computer for the length of the run, then removed. No server, no
+  account, no data leaves your machine.
+- The screen is kept on during a run, then your own "stay awake" setting is put back, even if
+  the run is stopped.
 
 ## Running it on a schedule
 
-`act.py` runs without Claude too, so cron or launchd can start it every morning:
+`act.py` runs without Claude too, so cron or launchd can start it every morning. After a plugin
+install the scripts live under Claude Code's plugin folder
+(`~/.claude/plugins/marketplaces/act-skill/skills/act/scripts/`), or use a clone of this repo.
+Set `ACT_PIN` in that job's environment if the phone has a lock code.
 
 ```bash
-python3 skills/act/scripts/act.py today && python3 skills/act/scripts/act.py install
+cd ~/.claude/plugins/marketplaces/act-skill/skills/act/scripts
+python3 act.py today; python3 act.py install   # ';' so install runs even if one app failed today
 ```
 
 Exit code `0`: everything went as expected (skipping a paid or too-big app is expected). `1`: an

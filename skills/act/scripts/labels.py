@@ -48,7 +48,9 @@ OPTIN_DONE = r"You are a tester|Vous êtes (un )?testeur"
 
 PLAY_NOT_FOUND = r"introuvable|not found"
 PLAY_NOT_IN_COUNTRY = r"pas disponible dans votre pays|not available in your country"
-PLAY_PAID = r"\d\s*(€|\$|£)|(€|\$|£)\s*\d|\bacheter\b|\bbuy\b"
+# A price where the Install button would be: any currency, before or after the amount.
+PLAY_PRICE = (r"(\d[\d.,\s\u00a0\u202f]*\s*(€|\$|£|¥|₹|₩|₺|₽|₫|₱|₪|zł|kr|Kč|Ft|lei|CHF|R\$|RM|Rp|R)\s*$)"
+              r"|(^\s*(€|\$|£|¥|₹|₩|₺|₽|₫|₱|₪|CHF|R\$|RM|Rp|US\$|CA\$|A\$)\s*\d)")
 PLAY_INSTALL = ("Installer", "Install")
 PLAY_INSTALLED = ("Ouvrir", "Open", "Désinstaller", "Uninstall")
 PLAY_DONE = ("Ouvrir", "Open", "Jouer", "Play")

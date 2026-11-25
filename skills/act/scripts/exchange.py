@@ -15,6 +15,7 @@ import json
 import os
 import re
 import subprocess
+import tempfile
 import time
 
 import act as a
@@ -25,7 +26,8 @@ import labels as L
 CFG = config.load()
 NAME = CFG["display_name"]
 MAX_MB = CFG["max_app_size_mb"]
-SHOTS = os.environ.get("ACT_SHOTS", "/tmp")
+SHOTS = os.environ.get("ACT_SHOTS") or tempfile.gettempdir()
+PLAY = "com.android.vending"
 CHROME = "com.android.chrome"
 
 # Outcomes that are normal, not failures: they don't make the run exit non-zero.
@@ -82,6 +84,18 @@ def page_down():
 
 # ---------- accept ----------
 
+def requested_app(d):
+    """The app a request card is aimed at: the text after '→' on its line."""
+    return d.split("→", 1)[1].split("\n")[0].strip() if "→" in d else ""
+
+
+def is_target(app, targets):
+    """Exact name, or the name before ACT's ': subtitle' ("My App" matches "My App: Puzzle Game").
+    Never a prefix of another name: "Notes" does not match "Notes Pro"."""
+    app = app.casefold()
+    return any(app == t.casefold() or app.startswith(t.casefold() + ":") for t in targets)
+
+
 def accept(targets):
     """Accept every pending request whose card says '→ <one of targets>'. Others are left untouched."""
     targets = [targets] if isinstance(targets, str) else list(targets)
@@ -95,9 +109,10 @@ def accept(targets):
     a.tap(*a.center(card[0]))
     time.sleep(5)
     accepted, misses, passes, wanted = [], 0, 0, set()
+    tries, unconfirmed = {}, []  # a tap that doesn't take is retried once, then reported
     while True:
         if misses >= 6:  # bottom reached: go round once more if a matching card was missed
-            if passes >= 2 or not (wanted - set(accepted)):
+            if passes >= 2 or not (wanted - set(accepted) - set(unconfirmed)):
                 break
             passes += 1
             misses = 0
@@ -115,8 +130,8 @@ def accept(targets):
             d = desc(c)
             if "→" not in d or L.ACCEPTED in d or d.split("\n")[0] in seen:
                 continue
-            if not any(f"→ {t}" in d.replace("  ", " ") for t in targets):
-                others.add(d.split("\n")[0] + " →" + d.split("→", 1)[1].split("\n")[0])
+            if not is_target(requested_app(d), targets):
+                others.add(d.split("\n")[0] + " → " + requested_app(d))
                 continue
             wanted.add(d.split("\n")[0])
             y1, y2 = a.bounds(c)[1], a.bounds(c)[3]
@@ -140,19 +155,29 @@ def accept(targets):
             continue
         a.log(f"accept {name}")
         a.tap(*a.center(btn))
+        ok = False
         for _ in range(10):  # wait for the sheet or the card to flip to "accepted"
             time.sleep(1)
             nodes = list(a.dump().iter("node"))
             if any(desc(n) == L.LATER for n in nodes) or any(
                     desc(n).startswith(name + "\n") and L.ACCEPTED in desc(n) for n in nodes):
+                ok = True
                 break
-        accepted.append(name)
+        tries[name] = tries.get(name, 0) + 1
+        if ok:
+            accepted.append(name)
+        elif tries[name] >= 2:
+            a.log(f"    {name}: not confirmed after 2 taps, left as is")
+            unconfirmed.append(name)
+            seen.add(name)
         misses = 0
         to_top()
     verb = "would accept" if a.dry() else "accepted"
     a.log(f"{verb} {len(accepted)} for {targets}: {accepted}")
     a.log(f"left pending (not your named apps): {len(others)} {sorted(others)}")
-    return accepted
+    if unconfirmed:
+        a.log(f"{len(unconfirmed)} request(s) not confirmed: {unconfirmed}")
+    return len(unconfirmed)
 
 
 # ---------- install ----------
@@ -261,32 +286,56 @@ CHECKED = (f"[...{DIALOG}.querySelectorAll('input[type=checkbox], [role=checkbox
 NAME_FIELD = (f"[...{DIALOG}.querySelectorAll('input[type=text], input:not([type])')]"
               ".find(e => e.getClientRects().length) || null")
 SUBSCRIPTION = (f"{DIALOG}.querySelector('[role=listbox], [role=combobox], [aria-haspopup=listbox], select')")
+# The subscription value actually selected (not just present somewhere in the dialog).
+SELECTED_SUBSCRIPTION = f"""(() => {{ const e = {SUBSCRIPTION}; if (!e) return null;
+  if (e.tagName === 'SELECT') return e.selectedIndex >= 0 ? e.options[e.selectedIndex].text.trim() : null;
+  const sel = e.querySelector('[role=option][aria-selected=true]');
+  if (sel) return (sel.innerText || sel.textContent).trim();
+  const own = (e.innerText || e.textContent || '').trim();
+  return own.includes('\\n') ? null : own; }})()"""
+JOIN_BOXES = 2  # the form has two boxes: link to the Google profile, email me updates
 
 FORM_STATE = f"""(() => {{ const d = {DIALOG}; if (!d) return {{dialog: false}};
   const t = {NAME_FIELD};
   const cb = [...d.querySelectorAll('input[type=checkbox], [role=checkbox]')].filter(e => e.getClientRects().length)
     .map(e => e.checked || e.getAttribute('aria-checked') === 'true');
-  return {{dialog: true, name: t ? t.value : null, checkboxes: cb, text: d.innerText.slice(0, 800)}}; }})()"""
+  return {{dialog: true, name: t ? t.value : null, checkboxes: cb, subscription: {SELECTED_SUBSCRIPTION}}}; }})()"""
+
+
+def no_email(value):
+    return bool(value) and re.fullmatch(L.GROUP_NO_EMAIL.strip("^$"), value.strip(), re.I) is not None
 
 
 def fill_join_dialog(tab):
-    """Fill the open join dialog from the page itself: name, every box off, no email."""
-    if not tab.click(NAME_FIELD):
-        return "no name field in the join dialog"
-    tab.js(f"(() => {{ const e = {NAME_FIELD}; e.focus(); e.select(); }})()")
-    tab.type(NAME)
+    """Fill the open join dialog from the page itself: every box off first (the name field may only
+    be editable once the profile is unlinked), then the name, then no email."""
     for _ in range(4):  # untick every ticked box (profile link, email updates)
         if not tab.click(CHECKED):
             break
         time.sleep(.6)
-    if not re.search(L.GROUP_NO_EMAIL.strip("^$"), tab.js(f"({SUBSCRIPTION} || {{}}).innerText || ''")):
+    if not tab.click(NAME_FIELD):
+        return "no name field in the join dialog"
+    tab.js(f"(() => {{ const e = {NAME_FIELD}; e.focus(); e.select(); }})()")
+    tab.type(NAME)
+    if not no_email(tab.js(SELECTED_SUBSCRIPTION)):
         if not tab.click(SUBSCRIPTION):
             return "no subscription menu in the join dialog"
         time.sleep(1.2)
         if not tab.click(find_text("[role=option], option, li", L.GROUP_NO_EMAIL)):
             return "no 'no email' option in the subscription menu"
         time.sleep(1)
+    for _ in range(2):  # a menu choice can re-tick the updates box: check again
+        if not tab.click(CHECKED):
+            break
+        time.sleep(.6)
     return None
+
+
+def form_ok(st):
+    """Submit only when the page itself shows exactly the configured values."""
+    return (isinstance(st, dict) and st.get("dialog") and st.get("name") == NAME
+            and len(st.get("checkboxes") or []) >= JOIN_BOXES and not any(st["checkboxes"])
+            and no_email(st.get("subscription")))
 
 
 def join(name):
@@ -303,10 +352,7 @@ def join(name):
     time.sleep(3)
     err = fill_join_dialog(tab)
     st = tab.js(FORM_STATE)
-    ok = (not err and isinstance(st, dict) and st.get("dialog") and st.get("name") == NAME
-          and st.get("checkboxes") is not None and not any(st["checkboxes"])
-          and re.search(L.GROUP_NO_EMAIL.strip("^$"), st.get("text", "")))
-    if not ok:
+    if err or not form_ok(st):
         return (f"form not as configured, left open without submitting (screenshot {shot('join-form')}): "
                 f"{err or str(st)[:300]}")
     if not tab.click(find_text("[role=button], button", L.GROUP_SUBMIT, DIALOG)):
@@ -346,20 +392,20 @@ def play_install(name):
     if not pos:
         return f"'{L.STEP_INSTALL}' not found on the card"
     a.tap(*pos)
-    for _ in range(10):
+    for _ in range(12):
         time.sleep(1)
-        if a.focus_pkg() == "com.android.vending":
+        if a.focus_pkg() == PLAY:
             break
+    else:
+        return f"the Play Store did not open (screenshot {shot('play-open')})"
     time.sleep(3)
-    texts = lambda: [(n.get("text") or desc(n)) for n in a.dump().iter("node")]
-    t = texts()
+    play_nodes = lambda: [n for n in a.dump().iter("node") if n.get("package") == PLAY]
+    texts = lambda nodes: [(n.get("text") or desc(n)) for n in nodes]
+    nodes = play_nodes()
+    t = texts(nodes)
     if any(re.search(L.PLAY_NOT_FOUND, x, re.I) for x in t):
         a.sh("input keyevent KEYCODE_BACK")
         return "not on the Play Store yet (retry ~30 min after the opt-in)"
-    # Never pay: a price or a buy button on the page means a paid app, and it is left alone.
-    if any(re.search(L.PLAY_PAID, x, re.I) for x in t):
-        a.sh("input keyevent KEYCODE_BACK")
-        return "paid app: skipped, never bought"
     if any(re.search(L.PLAY_NOT_IN_COUNTRY, x, re.I) for x in t):
         a.sh("input keyevent KEYCODE_BACK")
         return "not available in this country (developer's side: report it in ACT)"
@@ -368,6 +414,14 @@ def play_install(name):
     if any(x in L.PLAY_INSTALLED for x in t):
         a.sh("input keyevent KEYCODE_BACK")
         return f"already installed ({size})"
+    # Never pay: the only button ever tapped is one labelled exactly "Install". A paid app shows
+    # its price there instead (in-app purchase notes elsewhere on the page don't matter).
+    btn = [n for n in nodes if (n.get("text") or desc(n)) in L.PLAY_INSTALL]  # the label; its parent is the button
+    if not btn:
+        a.sh("input keyevent KEYCODE_BACK")
+        if any(re.search(L.PLAY_PRICE, x) for x in t):
+            return "paid app: skipped, never bought"
+        return f"no Install button (screenshot {shot('play')})"
     if MAX_MB and mb is None:
         a.sh("input keyevent KEYCODE_BACK")
         return f"size not shown, skipped (limit {MAX_MB} MB; screenshot {shot('play-size')})"
@@ -377,14 +431,10 @@ def play_install(name):
     if a.dry():
         a.sh("input keyevent KEYCODE_BACK")
         return f"dry run: would install ({size})"
-    btn = [n for n in a.dump().iter("node")
-           if (n.get("text") or desc(n)) in L.PLAY_INSTALL]  # the label; its parent is the button
-    if not btn:
-        return f"no Install button (screenshot {shot('play')})"
     a.tap(*a.center(btn[0]))
     for _ in range(100):  # up to ~5 min for the download (games weigh hundreds of MB)
         time.sleep(3)
-        if any(x in L.PLAY_DONE for x in texts()):
+        if any(x in L.PLAY_DONE for x in texts(play_nodes())):
             return f"installed ({size})"
     return f"install did not finish (screenshot {shot('play-wait')})"
 
@@ -406,15 +456,18 @@ def install():
             a.log(f"    {name}: {status}")
             report.append((name, status))
             continue
-        if L.STATE_JOINED not in state:
-            a.log(f"> {name}: join group")
-            status = join(name)
-        if not status and L.STATE_OPTED_IN not in state:
-            a.log(f"> {name}: opt in")
-            status = optin(name)
-        if not status:
-            a.log(f"> {name}: install")
-            status = play_install(name)
+        try:
+            if L.STATE_JOINED not in state:
+                a.log(f"> {name}: join group")
+                status = join(name)
+            if not status and L.STATE_OPTED_IN not in state:
+                a.log(f"> {name}: opt in")
+                status = optin(name)
+            if not status:
+                a.log(f"> {name}: install")
+                status = play_install(name)
+        except (cdp.CDPError, OSError) as e:
+            status = f"web page error, card left as is: {e}"
         a.log(f"    {name}: {status}")
         report.append((name, status))
     failures = [(n, s) for n, s in report if not EXPECTED.match(s)]

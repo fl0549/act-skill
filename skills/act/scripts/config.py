@@ -6,6 +6,7 @@ stays in the user's own shell as ACT_PIN.
 """
 import json
 import os
+import sys
 
 PATH = os.environ.get("ACT_CONFIG") or os.path.expanduser("~/.config/act-skill/config.json")
 
@@ -24,15 +25,26 @@ ENV = {"display_name": "ACT_DISPLAY_NAME", "accept_for": "ACT_ACCEPT_FOR",
        "max_app_size_mb": "ACT_MAX_MB", "seconds_per_app": "ACT_SECONDS"}
 
 
+def _fail(msg):
+    print(msg, file=sys.stderr)
+    sys.exit(2)  # could not start
+
+
 def load():
     cfg = dict(DEFAULTS)
     if os.path.exists(PATH):
-        with open(PATH) as f:
-            cfg.update({k: v for k, v in json.load(f).items() if k in DEFAULTS})
+        try:
+            with open(PATH, encoding="utf-8") as f:
+                cfg.update({k: v for k, v in json.load(f).items() if k in DEFAULTS})
+        except (ValueError, AttributeError) as e:
+            _fail(f"{PATH} is not valid JSON ({e}): fix it, or delete it to start over")
     for key, var in ENV.items():
         if os.environ.get(var):
             v = os.environ[var]
-            cfg[key] = int(v) if isinstance(DEFAULTS[key], int) else v
+            try:
+                cfg[key] = int(v) if isinstance(DEFAULTS[key], int) else v
+            except ValueError:
+                _fail(f"{var}={v!r}: expected a whole number")
     cfg["accept_for"] = apps(cfg["accept_for"])
     return cfg
 
@@ -48,12 +60,12 @@ def apps(value):
 def save(**values):
     cfg = {}
     if os.path.exists(PATH):
-        with open(PATH) as f:
+        with open(PATH, encoding="utf-8") as f:
             cfg = json.load(f)
     if values.get("accept_for") is not None:
         values["accept_for"] = apps(values["accept_for"])
     cfg.update({k: v for k, v in values.items() if k in DEFAULTS and v is not None})
     os.makedirs(os.path.dirname(PATH), exist_ok=True)
-    with open(PATH, "w") as f:
+    with open(PATH, "w", encoding="utf-8") as f:
         json.dump(cfg, f, indent=2, ensure_ascii=False)
     return load()
