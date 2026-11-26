@@ -32,7 +32,7 @@ CHROME = "com.android.chrome"
 
 # Outcomes that are normal, not failures: they don't make the run exit non-zero.
 EXPECTED = re.compile(r"^(installed|already installed|dry run|not on the Play Store yet|paid app|too big|"
-                      r"not available in this country|join requested)")
+                      r"not available in this country|join requested|tester access not granted yet)")
 
 
 def desc(n):
@@ -76,6 +76,18 @@ def to_top():
     time.sleep(1)
 
 
+def personal_top():
+    """Scroll the Personnel list to its very top (the "your current apps" card), however long it is."""
+    W, H = a.screen()
+    for _ in range(30):
+        if any(desc(n).startswith(L.MY_APPS_CARD) for n in a.dump().iter("node")):
+            return
+        for _ in range(3):
+            a.sh(f"input swipe {W//2} {int(H*.3)} {W//2} {int(H*.85)} 120")
+        time.sleep(.6)
+    raise SystemExit(f"could not scroll back to '{L.MY_APPS_CARD}'")
+
+
 def page_down():
     W, H = a.screen()
     a.sh(f"input swipe {W//2} {int(H*.72)} {W//2} {int(H*.42)} 400")
@@ -96,18 +108,54 @@ def is_target(app, targets):
     return any(app == t.casefold() or app.startswith(t.casefold() + ":") for t in targets)
 
 
-def accept(targets):
-    """Accept every pending request whose card says '→ <one of targets>'. Others are left untouched."""
+def request_score(card, nodes):
+    """The requester's score on a request card (the 🔥 number, then the tests they finished), or (0, 0)."""
+    t, b = a.bounds(card)[1], a.bounds(card)[3]
+    for n in nodes:
+        if n is not card and t <= a.center(n)[1] <= b:
+            m = re.fullmatch(L.REQUEST_SCORE, desc(n))
+            if m:
+                return int(m.group(1)), int(m.group(2) or 0)
+    return 0, 0
+
+
+def best_requests(targets, best):
+    """Names of the `best` pending requests for `targets` with the highest scores (read on screen)."""
+    to_top()
+    scores, misses = {}, 0
+    while misses < 4:
+        nodes = list(a.dump().iter("node"))
+        before = len(scores)
+        for c in nodes:
+            d = desc(c)
+            if "→" in d and L.ACCEPTED not in d and is_target(requested_app(d), targets):
+                name, sc = d.split("\n")[0], request_score(c, nodes)
+                if sc > scores.get(name, (-1, -1)):
+                    scores[name] = sc
+        misses = misses + 1 if len(scores) == before else 0
+        W, H = a.screen()
+        a.sh(f"input swipe {W//2} {int(H*.7)} {W//2} {int(H*.5)} 1000")  # slow: a score is read whole
+        time.sleep(1)
+    ranked = sorted(scores, key=lambda k: scores[k], reverse=True)
+    a.log("requests by score: " + ", ".join(f"{k} {scores[k][0]} (done {scores[k][1]})" for k in ranked))
+    to_top()
+    return set(ranked[:best])
+
+
+def accept(targets, best=None):
+    """Accept every pending request whose card says '→ <one of targets>' (only the `best` highest
+    scored ones when given). Others are left untouched."""
     targets = [targets] if isinstance(targets, str) else list(targets)
     seen = set()  # dry run: cards already reported
     others = set()  # pending requests for apps the user did not name: left alone
     open_personal()
-    to_top()
+    personal_top()
     card = [n for n in a.dump().iter("node") if desc(n).startswith(L.MY_APPS_CARD)]
     if not card:
         raise SystemExit(f"'{L.MY_APPS_CARD}' card not found")
     a.tap(*a.center(card[0]))
     time.sleep(5)
+    allowed = best_requests(targets, best) if best else None
     accepted, misses, passes, wanted = [], 0, 0, set()
     tries, unconfirmed = {}, []  # a tap that doesn't take is retried once, then reported
     while True:
@@ -123,14 +171,20 @@ def accept(targets):
             a.tap(*a.center(later[0]))
             time.sleep(2)
             continue
-        if not any(desc(n) == L.REQUESTS_TITLE for n in nodes):
+        for _ in range(3):  # an empty read during an animation is not "left the screen"
+            if any(desc(n) == L.REQUESTS_TITLE for n in nodes):
+                break
+            time.sleep(1.5)
+            nodes = list(a.dump().iter("node"))
+        else:
             raise SystemExit(f"left the '{L.REQUESTS_TITLE}' screen")
         hit = None
         for c in nodes:
             d = desc(c)
             if "→" not in d or L.ACCEPTED in d or d.split("\n")[0] in seen:
                 continue
-            if not is_target(requested_app(d), targets):
+            if not is_target(requested_app(d), targets) or (
+                    allowed is not None and d.split("\n")[0] not in allowed):
                 others.add(d.split("\n")[0] + " → " + requested_app(d))
                 continue
             wanted.add(d.split("\n")[0])
@@ -174,7 +228,8 @@ def accept(targets):
         to_top()
     verb = "would accept" if a.dry() else "accepted"
     a.log(f"{verb} {len(accepted)} for {targets}: {accepted}")
-    a.log(f"left pending (not your named apps): {len(others)} {sorted(others)}")
+    a.log(f"left pending ({'not among the best' if best else 'not your named apps'}): "
+          f"{len(others)} {sorted(others)}")
     if unconfirmed:
         a.log(f"{len(unconfirmed)} request(s) not confirmed: {unconfirmed}")
     return len(unconfirmed)
@@ -183,19 +238,23 @@ def accept(targets):
 # ---------- install ----------
 
 def is_card(n):
-    """An app card of the Installation section: an ImageView whose description is 'Name\n...'."""
-    return n.get("class", "").endswith("ImageView") and "\n1\n2\n3\n" in desc(n)
+    """An app card of the Installation section: an ImageView 'Name\n1\n…\n2\n…\n3…' (a line of
+    hint may follow each step number)."""
+    return n.get("class", "").endswith("ImageView") and re.search(L.CARD_STEPS, desc(n)) is not None
 
 
 def card_name(n):
     return desc(n).split("\n")[0]
 
 
+EMAILED = "emailed"  # card state: ACT sent the tester's e-mail itself, the card has no group step
+
+
 def scan_installation():
     """[(app name, {states})] for every card of the Installation section, top to bottom.
     States are the header buttons ACT shows once a step is done (joined, opted in)."""
     open_personal()
-    to_top()
+    personal_top()
     cards, order, cur = {}, [], None
     for _ in range(25):
         end = False
@@ -209,6 +268,8 @@ def scan_installation():
                 if cur not in cards:
                     cards[cur] = set()
                     order.append(cur)
+                if L.STEP_EMAILED in d:  # ACT added the tester's e-mail itself: no group to join
+                    cards[cur].add(EMAILED)
             elif cur and d in (L.STATE_JOINED, L.STATE_OPTED_IN):
                 cards[cur].add(d)
         if end:
@@ -220,16 +281,19 @@ def scan_installation():
 def find_step(name, step):
     """Scroll ACT until the given step of the given card is fully on screen; return its center."""
     open_personal()
-    to_top()
+    personal_top()
     W, H = a.screen()
     for _ in range(25):
         inside = False
-        for n in a.dump().iter("node"):
+        nodes = list(a.dump().iter("node"))
+        # never under the floating "Ajouter une app à tester" button: a tap there opens its sheet
+        bottom = min([a.bounds(n)[1] for n in nodes if L.ADD_APP in desc(n)] + [int(H * .88)])
+        for n in nodes:
             if is_card(n):
                 inside = card_name(n) == name
             elif inside and desc(n) == step:
                 x1, y1, x2, y2 = a.bounds(n)
-                if y2 - y1 > 60 and y1 > H * .19 and y2 < H * .88:
+                if y2 - y1 > 60 and y1 > H * .19 and y2 < bottom:
                     return a.center(n)
                 break
         page_down()
@@ -240,6 +304,17 @@ def default_browser():
     out = a.sh("cmd package resolve-activity --brief -a android.intent.action.VIEW "
                "-c android.intent.category.BROWSABLE -d https://groups.google.com").strip().splitlines()
     return out[-1].split("/")[0] if out and "/" in out[-1] else None
+
+
+OPENED = []  # Chrome tabs the current card opened: closed once the card went as expected
+
+
+def close_tabs():
+    while OPENED:
+        try:
+            OPENED.pop().call("Page.close")
+        except (cdp.CDPError, OSError):
+            pass
 
 
 def open_web_step(name, step, url_part):
@@ -265,7 +340,9 @@ def open_web_step(name, step, url_part):
             cdp.forward(a.ADB)
             pages = [t for t in cdp.tabs() if t.get("type") == "page"]
             if pages and url_part in pages[0].get("url", ""):
-                return cdp.Tab(pages[0]["webSocketDebuggerUrl"]), None
+                tab = cdp.Tab(pages[0]["webSocketDebuggerUrl"])
+                OPENED.append(tab)
+                return tab, None
             err = f"no Chrome tab on {url_part}"
         except OSError as e:
             err = f"Chrome's debugging connection is not reachable over adb ({e})"
@@ -274,13 +351,16 @@ def open_web_step(name, step, url_part):
 
 
 def find_text(selector, regex, root="document"):
-    """JS expression: first visible element matching selector whose text matches regex."""
+    """JS expression: first visible element matching selector whose text matches regex (an
+    <input type=submit> carries its label in `value`)."""
     return (f"[...{root}.querySelectorAll({json.dumps(selector)})]"
-            f".find(e => new RegExp({json.dumps(regex)}, 'i').test((e.innerText || e.textContent || '').trim())"
+            f".find(e => new RegExp({json.dumps(regex)}, 'i').test((e.innerText || e.value || e.textContent || '').trim())"
             f" && e.getClientRects().length) || null")
 
 
-DIALOG = "document.querySelector('[role=dialog]')"
+# The join form: the dialog holding the name field (the page has other dialogs, e.g. the menu drawer).
+DIALOG = ("[...document.querySelectorAll('[role=dialog]')].find(d => d.getClientRects().length"
+          " && d.querySelector('input[type=text], input:not([type])') && d.querySelector('[role=checkbox], input[type=checkbox]'))")
 CHECKED = (f"[...{DIALOG}.querySelectorAll('input[type=checkbox], [role=checkbox]')]"
            ".find(e => (e.checked || e.getAttribute('aria-checked') === 'true') && e.getClientRects().length) || null")
 NAME_FIELD = (f"[...{DIALOG}.querySelectorAll('input[type=text], input:not([type])')]"
@@ -344,10 +424,19 @@ def join(name):
     tab, err = open_web_step(name, L.STEP_JOIN, "groups.google.com")
     if err:
         return err
+    for _ in range(20):  # wait for the group page to show its content or its join button
+        if len(tab.js("document.body ? document.body.innerText : ''") or "") > 40:
+            break
+        time.sleep(1)
+    time.sleep(2)  # the join button comes in last
     asking = False
     if not tab.click(find_text("[role=button], button, a", L.GROUP_JOIN)):
         if not tab.click(find_text("[role=button], button, a", L.GROUP_ASK)):
-            return f"no join button on the group page (already a member?) (screenshot {shot('join')})"
+            # no join button: a member sees the group's content, a non-member a "can't view" notice
+            body = tab.js("document.body ? document.body.innerText : ''") or ""
+            if len(body) > 40 and not re.search(L.GROUP_NOT_MEMBER, body, re.I):
+                return None
+            return f"no join button on the group page (screenshot {shot('join')})"
         asking = True  # this group needs its owner's approval
     time.sleep(3)
     err = fill_join_dialog(tab)
@@ -370,11 +459,41 @@ def optin(name):
     if err:
         return err
     tester = f"new RegExp({json.dumps(L.OPTIN_DONE)}, 'i').test(document.body.innerText)"
+    known = "|".join((L.OPTIN_DONE, L.OPTIN_NOT_YET, L.OPTIN_BUTTON.strip("^$")))
+    for _ in range(25):  # the page loads slowly: wait until it shows one of its known states
+        if tab.js(f"!!document.body && new RegExp({json.dumps(known)}, 'im').test(document.body.innerText)"):
+            break
+        time.sleep(1)
     if not tab.js(tester):
-        if not tab.click(find_text("[role=button], button, a, input[type=submit]", L.OPTIN_BUTTON)):
-            return f"no 'Become a tester' button (screenshot {shot('optin')})"
+        if tab.js(f"new RegExp({json.dumps(L.OPTIN_NOT_YET)}, 'i').test(document.body.innerText)"):
+            return "tester access not granted yet by the developer (retry later)"
+        try:
+            if not tab.click(find_text("[role=button], button, a, input[type=submit]", L.OPTIN_BUTTON)):
+                return f"no 'Become a tester' button (screenshot {shot('optin')})"
+        except OSError:
+            pass  # the click reloaded the page under the connection: checked again below
         time.sleep(4)
+        tab = reconnect("play.google.com/apps/testing") or tab  # the click reloads the page
+        for _ in range(15):
+            if tab.js(f"!!document.body && {tester}"):
+                break
+            time.sleep(1)
     return None if tab.js(tester) else f"opt-in not confirmed (screenshot {shot('optin-after')})"
+
+
+def reconnect(url_part):
+    """A fresh connection to the foreground tab after it navigated (the old one may hang)."""
+    for _ in range(10):
+        try:
+            pages = [t for t in cdp.tabs() if t.get("type") == "page" and url_part in t.get("url", "")]
+            if pages:
+                tab = cdp.Tab(pages[0]["webSocketDebuggerUrl"])
+                OPENED.append(tab)
+                return tab
+        except OSError:
+            pass
+        time.sleep(1)
+    return None
 
 
 def play_size_mb(texts):
@@ -449,18 +568,21 @@ def install():
     report = []
     for name, state in cards:
         status = None
-        if a.dry() and (L.STATE_JOINED not in state or L.STATE_OPTED_IN not in state):
-            todo = [s for s, k in (("join group", L.STATE_JOINED), ("opt in", L.STATE_OPTED_IN)) if k not in state]
+        # ACT shows "group joined" as soon as the link was opened, joined or not: the group page
+        # itself decides (join() returns at once when it says you are a member).
+        needs_join = EMAILED not in state
+        if a.dry():
+            todo = (["join group"] if needs_join else []) + ["opt in"]  # each checked on its own page
             as_name = f' as "{NAME}"' if NAME else " (no display_name configured: would stop)"
-            status = f"dry run: would {' + '.join(todo)}{as_name if 'join group' in todo else ''}, then install"
+            status = f"dry run: would {' + '.join(todo)}{as_name if needs_join else ''}, then install"
             a.log(f"    {name}: {status}")
             report.append((name, status))
             continue
         try:
-            if L.STATE_JOINED not in state:
+            if needs_join:
                 a.log(f"> {name}: join group")
                 status = join(name)
-            if not status and L.STATE_OPTED_IN not in state:
+            if not status:  # the Play testing page decides, not ACT's "Opt-in fait"
                 a.log(f"> {name}: opt in")
                 status = optin(name)
             if not status:
@@ -470,6 +592,10 @@ def install():
             status = f"web page error, card left as is: {e}"
         a.log(f"    {name}: {status}")
         report.append((name, status))
+        if EXPECTED.match(status):
+            close_tabs()  # a card that stopped on something unexpected keeps its page open to look at
+        else:
+            OPENED.clear()
     failures = [(n, s) for n, s in report if not EXPECTED.match(s)]
     a.log("Install report: " + "; ".join(f"{n}: {s}" for n, s in report))
     if failures:

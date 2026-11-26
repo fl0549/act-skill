@@ -1,5 +1,36 @@
 # Changelog
 
+## 1.4.0 — 2026-11-26
+
+- **New `remind` command:** taps "Rappel" for every partner who hasn't opened your app today.
+  ACT draws its day grid without exposing it to accessibility, so the grid is read from a
+  screenshot (standard library only); partners it can't read are left alone. One reminder per
+  partner per day: ACT refuses a second one, and a local record skips those already sent.
+- **`accept --best N`:** accept only the N requests with the highest requester score (🔥, then
+  tests finished); the others stay pending and are listed.
+- First real `accept` and `install` runs on the phone, and what they taught:
+  - The real Google Groups join form sits in a page with another dialog (the menu drawer): the
+    form is now found as the dialog holding the name field and the boxes. Nothing was ever sent
+    while it wasn't found: the form check stopped every card.
+  - ACT marks "group joined" / "opt-in done" as soon as a link is opened, joined or not: the
+    group page and the Play testing page decide, every run.
+  - New Installation card layouts (a hint line under each step; cards where ACT sends the
+    tester's e-mail itself, with no group to join).
+  - "App not available" on the opt-in page (the developer hasn't added you yet) is reported as
+    "retry later", not as a failure.
+  - The "Become a tester" button is an `<input>`: its label is read from its value. The page
+    reload after the click no longer breaks the check.
+  - Steps under the floating "Ajouter une app à tester" button are never tapped.
+  - Each card's Chrome tabs are closed once the card went as expected; a card that stopped
+    keeps its page open to look at.
+- Fix: `accept` and `install` now scroll the Personnel list all the way back to its top (a long
+  list made `install` see no card and `accept` stop at once).
+- Fix: with one phone online, the run targets it explicitly, so an emulator started elsewhere no
+  longer breaks adb calls.
+- Fix: `today` stopped early when ACT reopened the list scrolled down past the apps left to
+  open (it only searched downward): it now searches upward, then downward.
+- An empty screen read during an animation no longer counts as "left the requests screen".
+
 ## 1.3.0 — 2026-11-25
 
 Fixes from a full review of the repo.

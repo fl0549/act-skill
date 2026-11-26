@@ -1,6 +1,6 @@
 ---
 name: act
-description: Run the ACT (Tester Party) closed-test exchange on a USB-connected Android phone over adb. `today` opens every app of ACT's "Aujourd'hui" list (~25 s each) and checks ACT counted it; `accept` accepts the pending exchange requests aimed at the user's own apps only; `install` joins each new app's Google Group, opts in and installs it from the Play Store (free apps under a size limit only). Every command has a `--dry-run`. Use only when the request names ACT or Tester Party, or is clearly about the Google Play closed-testing tester exchange (12 testers, 14 days): "do my ACT tests", "run ACT", "accept the ACT requests", "install the new ACT apps", "Tester Party", "fais mes tests ACT", "lance ACT", "accepte les demandes ACT", "installe les nouvelles apps ACT". Not for generic "accept the requests" or "install the apps" without ACT in context. No emulator.
+description: Run the ACT (Tester Party) closed-test exchange on a USB-connected Android phone over adb. `today` opens every app of ACT's "Aujourd'hui" list (~25 s each) and checks ACT counted it; `accept` accepts the pending exchange requests aimed at the user's own apps only; `install` joins each new app's Google Group, opts in and installs it from the Play Store (free apps under a size limit only); `remind` taps "Rappel" for the partners who haven't opened the user's app today. Every command has a `--dry-run`. Use only when the request names ACT or Tester Party, or is clearly about the Google Play closed-testing tester exchange (12 testers, 14 days): "do my ACT tests", "run ACT", "accept the ACT requests", "install the new ACT apps", "remind my ACT testers", "Tester Party", "fais mes tests ACT", "lance ACT", "accepte les demandes ACT", "installe les nouvelles apps ACT", "relance les testeurs ACT". Not for generic "accept the requests" or "install the apps" without ACT in context. No emulator.
 ---
 
 # ACT
@@ -40,15 +40,17 @@ Google profile and turns every group email off.
 ```bash
 python3 scripts/act.py                         # = today: every app of the Today list
 python3 scripts/act.py accept                  # requests for accept_for only (or --for "<app>", repeatable)
+python3 scripts/act.py accept --for "<app>" --best 3   # only the 3 requests with the highest score
 python3 scripts/act.py install                 # join group + opt in + install, every new card
+python3 scripts/act.py remind                  # "Rappel" for partners who haven't opened your app today
 python3 scripts/act.py --dry-run install       # any command: report what it would do, change nothing
 ACT_LIMIT=2 ACT_SECONDS=15 python3 scripts/act.py today   # quick trial
 ```
 
 The first time a user runs `accept` or `install`, offer a `--dry-run` first and show its report.
-Not yet exercised on real pages, so watch the first live run closely and show the user the
-screenshot if it stops: the Google Groups join (validated only on a local copy of the form)
-and a real `accept` tap (validated in dry run). `--dry-run` also works after the command name.
+Watch the first live `install` closely and show the user the screenshot if it stops: the Google
+Groups join was first validated on a local copy of the form. `--dry-run` also works after the
+command name.
 Run `today` in the background (15-20 min) and report the final line. Every command keeps the
 screen on for the whole run (`svc power stayon usb`) and restores it at the end unless
 `ACT_KEEP_AWAKE=1`.
@@ -56,6 +58,18 @@ screen on for the whole run (`svc power stayon usb`) and restores it at the end 
 **accept**: only requests whose card reads `→ <app>` for one of the named apps are accepted.
 Requests for the user's other apps stay pending, listed at the end: never accept them unless the
 user names that app. The list is scanned twice from the top if needed, so no card is missed.
+`--best N` accepts only the N requests with the highest requester score (the 🔥 number on the
+card, then "fait N", the tests they finished); the others stay pending and are listed.
+
+**remind**: in Tests > Personnel each exchange card has a day grid (top row: the user, green;
+bottom row: the partner, blue, filled or light) and a "Rappel" button that sends the partner a
+reminder at once. ACT doesn't expose the grid to accessibility, so it is read from a screenshot
+(`scripts/pixels.py`, standard library). "Rappel" is tapped only when today's bottom cell is empty.
+Cards whose bottom row is only outlined ("pas encore installée", or "auto-check désactivé") can't
+be told apart: left alone and listed. ACT itself refuses a second reminder the same day ("Rappel
+déjà envoyé aujourd'hui"), and a local record (`reminders.json` next to the config) skips the ones
+already sent. Best run in the evening: earlier, partners may simply not have done their round yet.
+Takes ~5 min for ~40 cards.
 
 **install**: an app is on the Play Store only ~30 min after the opt-in ("Not found" / "Élément
 introuvable" before that is normal): run it once to join and opt in, then again 30+ min later to

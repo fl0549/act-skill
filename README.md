@@ -73,6 +73,8 @@ Just ask, in your own words:
 do my ACT tests
 accept the ACT requests
 install the new ACT apps
+remind my ACT testers who haven't opened my app today
+accept the 3 best ACT requests for my app
 show me what ACT install would do, without doing it
 raise the ACT app size limit to 200 MB
 ```
@@ -81,6 +83,10 @@ raise the ACT app size limit to 200 MB
   ACT counts), uses each one ~25 s, closes it, and checks ACT counted it.
 - **accept**: accepts the pending exchange requests aimed at **your** apps, the ones you name.
   Requests for your other apps stay pending and are listed.
+- **accept --best 3**: only the 3 requests whose developers have the best score on ACT (🔥, then
+  tests finished). The rest stay pending.
+- **remind**: taps ACT's "Rappel" for each partner who hasn't opened your app today, once a day at
+  most. Best in the evening.
 - **install**: for each new app, joins its Google Group, opts in as a tester and installs it from
   the Play Store. Play needs about 30 minutes after the opt-in: run it again later for those.
 - **--dry-run**: any of the above reports what it would do and changes nothing. Claude offers one
@@ -124,6 +130,9 @@ The skill drives your phone, so here is exactly what it will and won't do.
   without reading the screen happen only in apps that expose no control at all (game engines);
   a payment sheet, should one open, is dismissed at once. If an app hands off to another app, it
   goes back.
+- **Reminders only where they're due.** A partner is reminded only when ACT's own day grid shows
+  they haven't opened your app today; when that can't be read, they're left alone. ACT allows
+  one reminder per partner per day, and the skill never tries for a second.
 - **Only what you named.** It accepts requests for the apps you named, by exact name ("Notes"
   never matches "Notes Pro"), nothing else, and installs only what ACT lists for you, under your
   size limit.

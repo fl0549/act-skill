@@ -22,11 +22,18 @@ BACK = "Retour"                               # back arrow on ACT's inner screen
 MY_APPS_CARD = "Vos applications actuelles"   # Personnel tab card that opens the exchange requests
 REQUESTS_TITLE = "Demandes d'échange"         # title of the exchange requests screen
 ACCEPT = "Accepter"                           # button on a request card
+REQUEST_SCORE = r"(\d+)(?:\n · fait (\d+))?"      # requester's score on a request card: "205\n · fait 18"
 ACCEPTED = "Accepté"                          # a request card already accepted
 LATER = "Plus tard"                           # closes the "The swap has started" sheet
 OWN_APPS_SECTION = r"\n\d+ à ouvrir aujourd'hui"   # your own apps' section, after Installation
+REMIND = "Rappel"                             # exchange card button: sends the partner a reminder
+REMIND_SENT = r"^Envoyé"                      # the snackbar after a reminder is sent
+REMIND_ALREADY = r"déjà envoyé aujourd"        # the snackbar when one was already sent today
+ADD_APP = "Ajouter une app à tester"           # floating button over the Personnel list
 STATE_JOINED = "Groupe rejoint"               # card header button once the group is joined
 STATE_OPTED_IN = "Opt-in fait"                # card header button once the opt-in is done
+CARD_STEPS = r"\n2\n(?:[^\n]*\n)?3(?:\n|$)"   # Installation card: steps 2 and 3, each maybe with a hint line (step 1 may show a check instead of "1")
+STEP_EMAILED = "E-mail du testeur envoyé automatiquement"   # step 1 done by ACT: no group to join
 STEP_JOIN = "Rejoindre le groupe de testeurs"
 STEP_OPTIN = "Devenir testeur (s'inscrire)"
 STEP_INSTALL = "Installer depuis le Play Store"
@@ -37,11 +44,13 @@ GROUP_JOIN = r"^(Rejoindre le groupe|Join group)$"
 GROUP_ASK = r"^(Demander à rejoindre( le groupe)?|Ask to join( group)?)$"   # groups needing approval
 GROUP_SUBMIT = r"^(Rejoindre le groupe|Join group|Demander à rejoindre( le groupe)?|Ask to join( group)?|" \
                r"Envoyer( la demande)?|Send( request)?)$"
+GROUP_NOT_MEMBER = r"Vous ne pouvez pas voir|ne pouvez pas accéder|You don't have permission|can't access|Content unavailable|Contenu non disponible|DNS_PROBE|ERR_"   # a page that is not the group's content
 GROUP_NO_EMAIL = r"^(Aucun e-mail|No email)$"
 
 # ---------- Play testing page (web, read in Chrome) ----------
 
 OPTIN_BUTTON = r"^(Become a tester|Devenir testeur)$"
+OPTIN_NOT_YET = r"App not available|Application non disponible|hasn't been published yet|n'est pas encore"   # the developer hasn't added you yet
 OPTIN_DONE = r"You are a tester|Vous êtes (un )?testeur"
 
 # ---------- Play Store (native app) ----------

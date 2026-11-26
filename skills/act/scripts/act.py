@@ -64,6 +64,8 @@ def check_device():
             fail(f"No phone found over adb{hint}. Plug it in with USB debugging on.")
         if len(devices) > 1:
             fail(f"Several phones connected: {devices}. Pick one: export ANDROID_SERIAL=<serial>")
+        # target it explicitly: an offline emulator or a phone plugged in later must not confuse adb
+        os.environ["ANDROID_SERIAL"] = devices[0]
     m = re.search(r"versionName=(\S+)", sh(f"dumpsys package {ACT} | grep -m1 versionName"))
     if not m:
         fail("Tester Party (ACT) is not installed on this phone.")
@@ -321,12 +323,14 @@ def run_today():
     while len(done) + len(failed) < LIMIT:
         root = open_act_today()
         todo = [(nm, b) for nm, b in rows(root) if nm not in skipped]
-        scrolls = 0
-        while not todo and scrolls < 8:
-            scroll_list()
-            root = dump()
-            todo = [(nm, b) for nm, b in rows(root) if nm not in skipped]
-            scrolls += 1
+        # ACT keeps its scroll position: the rows left may sit above the screen as well as below it
+        for down in (False, True):
+            scrolls = 0
+            while not todo and scrolls < 8:
+                scroll_list(down)
+                root = dump()
+                todo = [(nm, b) for nm, b in rows(root) if nm not in skipped]
+                scrolls += 1
         if not todo:
             break
         name, btn = todo[0]
@@ -384,7 +388,11 @@ def main():
     p = command("accept", "accept the pending exchange requests aimed at your apps")
     p.add_argument("--for", dest="target", action="append",
                    help='one of your apps as ACT shows it; repeatable (default: config accept_for)')
+    p.add_argument("--best", type=int, help="accept only the N requests with the highest score (🔥, then tests done)")
     command("install", "join group + opt in + install every app of the Installation section")
+    p = command("remind", "remind the partners who haven't opened your app today")
+    p.add_argument("--for", dest="target", action="append",
+                   help="only for this app of yours, as ACT shows it; repeatable (default: all your apps)")
     p = sub.add_parser("config", help="show the preferences, or set them")
     p.add_argument("--display-name")
     p.add_argument("--accept-for", help='comma-separated: "App One, App Two"')
@@ -409,16 +417,19 @@ def main():
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(1))  # a stopped run still restores it
     sh("svc power stayon usb")  # the phone must never lock during a run
     if dry():
-        log("DRY RUN: nothing will be opened, accepted, joined or installed")
+        log("DRY RUN: nothing will be opened, accepted, joined, installed or sent")
     failures = 0
     try:
         unlock()
         if args.cmd == "accept":
             import exchange
-            failures = exchange.accept(args.target)
+            failures = exchange.accept(args.target, args.best)
         elif args.cmd == "install":
             import exchange
             failures = exchange.install()
+        elif args.cmd == "remind":
+            import remind
+            failures = remind.remind(config.apps(args.target))
         else:
             failures = run_today()
     finally:
