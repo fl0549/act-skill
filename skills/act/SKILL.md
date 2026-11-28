@@ -1,6 +1,6 @@
 ---
 name: act
-description: Run the ACT (Tester Party) closed-test exchange on a USB-connected Android phone over adb. `today` opens every app of ACT's "Aujourd'hui" list (~25 s each) and checks ACT counted it; `accept` accepts the pending exchange requests aimed at the user's own apps only; `install` joins each new app's Google Group, opts in and installs it from the Play Store (free apps under a size limit only); `remind` taps "Rappel" for the partners who haven't opened the user's app today. Every command has a `--dry-run`. Use only when the request names ACT or Tester Party, or is clearly about the Google Play closed-testing tester exchange (12 testers, 14 days): "do my ACT tests", "run ACT", "accept the ACT requests", "install the new ACT apps", "remind my ACT testers", "Tester Party", "fais mes tests ACT", "lance ACT", "accepte les demandes ACT", "installe les nouvelles apps ACT", "relance les testeurs ACT". Not for generic "accept the requests" or "install the apps" without ACT in context. No emulator.
+description: Run the ACT (Tester Party) closed-test exchange on a USB-connected Android phone over adb. `today` opens every app of ACT's "Aujourd'hui" list (~25 s each) and checks ACT counted it; `accept` accepts the pending exchange requests aimed at the user's own apps only; `install` joins each new app's Google Group, opts in and installs it from the Play Store (free apps under a size limit only); `remind` taps "Rappel" for the partners who haven't opened the user's app today. Every command has a `--dry-run`. Use only when the request names ACT or Tester Party, or is clearly about the Google Play closed-testing tester exchange (12 testers, 14 days): "do my ACT tests", "run ACT", "accept the ACT requests", "install the new ACT apps", "remind my ACT testers", "remind the ones who didn't play yesterday", "Tester Party", "fais mes tests ACT", "lance ACT", "accepte les demandes ACT", "installe les nouvelles apps ACT", "relance les testeurs ACT", "relance ceux qui n'ont pas joué hier". Not for generic "accept the requests" or "install the apps" without ACT in context. No emulator.
 ---
 
 # ACT
@@ -43,6 +43,7 @@ python3 scripts/act.py accept                  # requests for accept_for only (o
 python3 scripts/act.py accept --for "<app>" --best 3   # only the 3 requests with the highest score
 python3 scripts/act.py install                 # join group + opt in + install, every new card
 python3 scripts/act.py remind                  # "Rappel" for partners who haven't opened your app today
+python3 scripts/act.py remind --yesterday      # only those who didn't open it yesterday either (mornings)
 python3 scripts/act.py --dry-run install       # any command: report what it would do, change nothing
 ACT_LIMIT=2 ACT_SECONDS=15 python3 scripts/act.py today   # quick trial
 ```
@@ -69,6 +70,9 @@ Cards whose bottom row is only outlined ("pas encore installée", or "auto-check
 be told apart: left alone and listed. ACT itself refuses a second reminder the same day ("Rappel
 déjà envoyé aujourd'hui"), and a local record (`reminders.json` next to the config) skips the ones
 already sent. Best run in the evening: earlier, partners may simply not have done their round yet.
+In the morning, `--yesterday` reminds only the partners whose cell for yesterday is empty too (the
+cell left of today's; a partner on their first day is left alone). Your apps are sections that
+fold: a section showing no card under its header is opened once per run.
 Takes ~5 min for ~40 cards.
 
 **install**: an app is on the Play Store only ~30 min after the opt-in ("Not found" / "Élément

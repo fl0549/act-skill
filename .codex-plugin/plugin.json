@@ -1,7 +1,7 @@
 {
   "name": "act-skill",
   "description": "Automates the ACT (Tester Party) closed-test exchange on a USB-connected Android phone over adb: daily app opens, accepting exchange requests, joining tester groups and installing apps.",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "author": {
     "name": "fl0549"
   },

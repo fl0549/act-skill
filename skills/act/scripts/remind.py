@@ -79,14 +79,39 @@ def send(btn):
     return None
 
 
-def remind(targets=None):
-    """targets: your apps to remind for (None: all of them). Returns the number of failed sends."""
+def expand_collapsed(nodes, bottom, expanded):
+    """Your apps' sections fold, and ACT doesn't say which are folded: a section with no card under
+    its header (the next header or the end of the list right below) is opened, once per run.
+    Returns True when one was tapped (the screen changed)."""
+    heads = sorted((n for n in nodes if re.search(L.OWN_APPS_SECTION, n.get("content-desc") or "")),
+                   key=lambda n: a.bounds(n)[1])
+    for i, h in enumerate(heads):
+        name = h.get("content-desc").split("\n")[0]
+        l, t, r, b = a.bounds(h)
+        if name in expanded or b > bottom - 300:  # judged only with room below it to show a card
+            continue
+        below = [a.bounds(n)[1] for n in nodes if a.bounds(n)[1] >= b and (n.get("content-desc") or "")
+                 and n is not h]
+        nxt = a.bounds(heads[i + 1])[1] if i + 1 < len(heads) else None
+        if nxt is not None and nxt - b < 40 or nxt is None and not [y for y in below if y < bottom]:
+            expanded.add(name)
+            a.log(f"    {name}: section folded, opening it")
+            a.tap((l + r) // 2, (t + b) // 2)
+            time.sleep(1.5)
+            return True
+        expanded.add(name)  # open already: never tap it (that would fold it)
+    return False
+
+
+def remind(targets=None, yesterday=False):
+    """targets: your apps to remind for (None: all of them). yesterday: remind only the partners who
+    didn't open your app yesterday and haven't today yet. Returns the number of failed sends."""
     W, H = a.screen()
     today, done = sent_today()
     x.open_personal()
     x.personal_top()
     section, seen, results, failed = None, set(), {}, []
-    stale, last = 0, None
+    stale, last, expanded = 0, None, set()
     while stale < 3:
         nodes = list(a.dump().iter("node"))
         img = None  # captured only when a card on this screen needs its grid read
@@ -96,6 +121,9 @@ def remind(targets=None):
         # nothing below the floating "Ajouter une app à tester" button is tapped or read
         fab = [a.bounds(n)[1] for n in nodes if L.ADD_APP in (n.get("content-desc") or "")]
         bottom = min(fab + [int(H * 0.9)]) - 4
+        if expand_collapsed(nodes, bottom, expanded):
+            stale, last = 0, None
+            continue
         # walk the screen top to bottom so each card gets the section (your app) above it
         for n in sorted(nodes, key=lambda n: a.bounds(n)[1]):
             d = n.get("content-desc") or ""
@@ -126,6 +154,10 @@ def remind(targets=None):
                 results[key] = "can't tell (grid not readable, or the partner's auto-check is off): left alone"
             elif grid["them"]:
                 results[key] = "opened your app today"
+            elif yesterday and grid["them_yesterday"] is None:
+                results[key] = "no day before today in the grid: left alone"
+            elif yesterday and grid["them_yesterday"]:
+                results[key] = "opened your app yesterday: left alone"
             elif a.dry():
                 results[key] = "dry run: would remind"
             else:

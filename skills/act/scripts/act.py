@@ -393,6 +393,8 @@ def main():
     p = command("remind", "remind the partners who haven't opened your app today")
     p.add_argument("--for", dest="target", action="append",
                    help="only for this app of yours, as ACT shows it; repeatable (default: all your apps)")
+    p.add_argument("--yesterday", action="store_true",
+                   help="only the partners who didn't open your app yesterday and haven't yet today")
     p = sub.add_parser("config", help="show the preferences, or set them")
     p.add_argument("--display-name")
     p.add_argument("--accept-for", help='comma-separated: "App One, App Two"')
@@ -429,7 +431,7 @@ def main():
             failures = exchange.install()
         elif args.cmd == "remind":
             import remind
-            failures = remind.remind(config.apps(args.target))
+            failures = remind.remind(config.apps(args.target), args.yesterday)
         else:
             failures = run_today()
     finally:

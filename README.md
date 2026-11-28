@@ -86,7 +86,8 @@ raise the ACT app size limit to 200 MB
 - **accept --best 3**: only the 3 requests whose developers have the best score on ACT (🔥, then
   tests finished). The rest stay pending.
 - **remind**: taps ACT's "Rappel" for each partner who hasn't opened your app today, once a day at
-  most. Best in the evening.
+  most. Best in the evening; in the morning, `remind --yesterday` reminds only the partners who
+  didn't open it yesterday and haven't yet today.
 - **install**: for each new app, joins its Google Group, opts in as a tester and installs it from
   the Play Store. Play needs about 30 minutes after the opt-in: run it again later for those.
 - **--dry-run**: any of the above reports what it would do and changes nothing. Claude offers one

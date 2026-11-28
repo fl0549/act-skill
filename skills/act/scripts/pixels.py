@@ -79,7 +79,8 @@ def _cell(p):
 
 def read_grid(img, box):
     """Today's cells of the grid inside `box` (a card's bounds, clipped to the screen).
-    Returns {"me": bool, "them": bool} or None when no two-row grid with a today column is found."""
+    Returns {"me": bool, "them": bool, "them_yesterday": bool or None (today is the first day)},
+    or None when no two-row grid with a today column is found."""
     w, h, bpp, rows = img
     l, t, r, b = box
     px = lambda x, y: rows[y][x * bpp:x * bpp + 3]
@@ -105,7 +106,23 @@ def read_grid(img, box):
     def share(test, y1, y2):  # whole cell: a filled one, or a light one (outline + check, "opened manually")
         cells = [px(x, y) for x in range(tx - 24, tx + 25, 2) for y in range(y1, y2, 2)]
         return sum(map(test, cells)) / max(len(cells), 1)
-    return {"me": share(_green, t1, b1) > 0.05, "them": share(_blue, t2, b2) > 0.05}
+    out = {"me": share(_green, t1, b1) > 0.05, "them": share(_blue, t2, b2) > 0.05, "them_yesterday": None}
+    # yesterday: the cell left of today's, found as runs of cell colour across both rows' middles
+    m1, m2 = (t1 + b1) // 2, (t2 + b2) // 2
+    on = [x for x in range(max(l, 0), min(r, w)) if _cell(px(x, m1)) or _cell(px(x, m2))]
+    runs = []
+    for x in on:
+        if runs and x - runs[-1][1] <= 3:
+            runs[-1][1] = x
+        else:
+            runs.append([x, x])
+    i = next((k for k, (a, z) in enumerate(runs) if a - 6 <= tx <= z + 6), None)
+    if i:  # today isn't the grid's first day
+        a, z = runs[i - 1]
+        if z - a >= 20:
+            cells = [px(x, y) for x in range(a + 3, z - 2, 2) for y in range(t2, b2, 2)]
+            out["them_yesterday"] = sum(map(_blue, cells)) / max(len(cells), 1) > 0.05
+    return out
 
 
 SNACKBAR = (29, 36, 45)      # ACT's snackbar: a slate bar across the width, over list, cards or ads

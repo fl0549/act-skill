@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.4.1 — 2026-11-28
+
+- **`remind --yesterday`:** reminds only the partners whose grid shows no opening yesterday and
+  none yet today, so it can run in the morning without reminding everyone. The yesterday cell is
+  the one left of today's; a partner on their first day is left alone.
+- Fix: ACT now shows each of your apps as a section that folds. `remind` saw no card under a
+  folded section; a section with no card under its header is now opened (once per run, never
+  folded back).
+
 ## 1.4.0 — 2026-11-26
 
 - **New `remind` command:** taps "Rappel" for every partner who hasn't opened your app today.
